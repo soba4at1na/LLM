@@ -67,7 +67,6 @@ class ThreadSafeLLMClient:
         self.llm = Llama(
             model_path=model_path,
             n_gpu_layers=0,
-            f16=False,
             n_ctx=n_ctx,
             verbose=False
         )
