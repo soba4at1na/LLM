@@ -1,0 +1,120 @@
+{
+  "summary": {
+    "total": 10,
+    "correct": 8,
+    "problematic": 2,
+    "avg_confidence": 0.725
+  },
+  "results": [
+    {
+      "id": 1,
+      "original": "Маршрутизация в сети осуществляется с использованием протокола OSPF.",
+      "is_correct": true,
+      "confidence": 0.5,
+      "issues": [],
+      "corrected": "",
+      "analysis": "<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** IT Documentation Technical Analyst.\n    *   **Task:** Analyze a technical text for specific types of problems (redundancy, tau"
+    },
+    {
+      "id": 2,
+      "original": "Протокол TCP обеспечивает надежную передачу данных между узлами.",
+      "is_correct": true,
+      "confidence": 0.95,
+      "issues": [],
+      "corrected": "Протокол TCP обеспечивает надежную передачу данных между узлами.",
+      "analysis": "Текст технически корректен, лаконичен и не содержит стилистических или грамматических ошибок."
+    },
+    {
+      "id": 3,
+      "original": "IP отвечает за адресацию и маршрутизацию пакетов в сети.",
+      "is_correct": true,
+      "confidence": 0.5,
+      "issues": [],
+      "corrected": "",
+      "analysis": "<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** IT Documentation Technical Analyst.\n    *   **Task:** Analyze a technical text for specific types of problems (redundancy, tau"
+    },
+    {
+      "id": 4,
+      "original": "OSPF является протоколом динамической маршрутизации.",
+      "is_correct": true,
+      "confidence": 0.5,
+      "issues": [],
+      "corrected": "",
+      "analysis": "<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** IT Documentation Technical Analyst.\n    *   **Task:** Analyze a technical text for specific types of problems (redundancy, tau"
+    },
+    {
+      "id": 5,
+      "original": "HTTP используется для передачи гипертекста между клиентом и сервером.",
+      "is_correct": true,
+      "confidence": 0.5,
+      "issues": [],
+      "corrected": "",
+      "analysis": "<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** IT Documentation Technical Analyst.\n    *   **Task:** Analyze a technical text for specific types of problems (redundancy, tau"
+    },
+    {
+      "id": 6,
+      "original": "Маршрутизатор использует таблицу маршрутизации для выбора пути.",
+      "is_correct": false,
+      "confidence": 0.95,
+      "issues": [
+        {
+          "type": "redundancy",
+          "position": "всё предложение",
+          "description": "Использование слов 'Маршрутизатор' и 'таблица маршрутизации' в одном предложении создаёт избыточность, так как функция маршрутизации уже подразумевается самим устройством.",
+          "suggestion": "Убрать слово 'Маршрутизатор' или перефразировать, чтобы избежать повтора корня 'маршрут' в начале и середине предложения."
+        },
+        {
+          "type": "wordiness",
+          "position": "всё предложение",
+          "description": "Предложение содержит лишние слова для передачи сути действия.",
+          "suggestion": "Заменить на более лаконичную формулировку: 'Устройство выбирает путь по таблице маршрутизации' или 'Маршрутизатор определяет путь через таблицу маршрутизации'."
+        }
+      ],
+      "corrected": "Маршрутизатор определяет путь к назначению, используя таблицу маршрутизации.",
+      "analysis": "Исходный текст страдает от лексической избыточности (повтор корня 'маршрут') и многословности. Исправленный вариант сохраняет техническую точность, но устраняет повторение и делает формулировку более профессиональной."
+    },
+    {
+      "id": 7,
+      "original": "Протокол UDP не гарантирует доставку пакетов.",
+      "is_correct": true,
+      "confidence": 0.95,
+      "issues": [],
+      "corrected": "Протокол UDP не гарантирует доставку пакетов.",
+      "analysis": "Текст является технически корректным, лаконичным и не содержит ошибок стиля или терминологии."
+    },
+    {
+      "id": 8,
+      "original": "DNS используется для преобразования доменных имен в IP-адреса.",
+      "is_correct": true,
+      "confidence": 0.95,
+      "issues": [],
+      "corrected": "DNS используется для преобразования доменных имен в IP-адреса.",
+      "analysis": "Текст является корректным техническим определением. Формулировка точная, лаконичная и соответствует общепринятой терминологии. Нет избыточности, грамматических ошибок или двусмысленности."
+    },
+    {
+      "id": 9,
+      "original": "TCP/IP представляет собой стек сетевых протоколов.",
+      "is_correct": true,
+      "confidence": 0.5,
+      "issues": [],
+      "corrected": "",
+      "analysis": "<think>\nThinking Process:\n\n1.  **Analyze the Request:**\n    *   **Role:** IT Documentation Technical Analyst.\n    *   **Task:** Analyze a technical text for specific types of problems (redundancy, tau"
+    },
+    {
+      "id": 10,
+      "original": "OSPF рассчитывает кратчайший путь с использованием алгоритма Дейкстры.",
+      "is_correct": false,
+      "confidence": 0.95,
+      "issues": [
+        {
+          "type": "imprecise_terminology",
+          "position": "всё предложение",
+          "description": "Алгоритм Дейкстры не является стандартным алгоритмом для OSPF. OSPF использует алгоритм Дейкстры только для вычисления кратчайшего пути до одного узла (single-source shortest path) в рамках каждого региона (area), но формально протокол основан на алгоритме Дейкстры для построения дерева кратчайших путей (Shortest Path Tree) в каждом регионе. Более точное описание: OSPF использует алгоритм Дейкстры для вычисления кратчайшего пути до всех узлов в пределах одного региона (area).",
+          "suggestion": "OSPF использует алгоритм Дейкстры для вычисления кратчайшего пути до всех узлов в пределах каждого региона (area)."
+        }
+      ],
+      "corrected": "OSPF использует алгоритм Дейкстры для вычисления кратчайшего пути до всех узлов в пределах каждого региона (area).",
+      "analysis": "Исходное утверждение содержит неточность в терминологии: хотя OSPF действительно использует алгоритм Дейкстры, формулировка 'рассчитывает кратчайший путь' слишком упрощена и может вводить в заблуждение относительно масштаба вычислений (внутри региона vs между регионами). Исправленный текст уточняет, что алгоритм применяется для построения дерева кратчайших путей внутри каждого региона."
+    }
+  ]
+}
