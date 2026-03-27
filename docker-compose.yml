@@ -7,7 +7,7 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      - ollama:/root/.ollama
+      - ollama_data:/root/.ollama
     restart: unless-stopped
     deploy:
       resources:
@@ -16,17 +16,29 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    command: serve
 
-  text-analyzer:
-    build: .
-    container_name: text-analyzer
+  backend:
+    build: ./backend
+    container_name: text-analyzer-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
     depends_on:
       - ollama
     environment:
       - OLLAMA_HOST=http://ollama:11434
-    volumes:
-      - ./results:/app/results
-    command: python neural_analyzer.py
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: text-analyzer-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
-  ollama:
+  ollama_data:

@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+pydantic
+psutil
+aiofiles
+python-docx
+PyPDF2
+lxml
