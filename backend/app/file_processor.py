@@ -19,7 +19,6 @@ class FileProcessor:
         
         elif ext == 'json':
             # Для JSON файлов — преобразуем в читаемый текст
-            import json
             data = json.loads(file_content.decode('utf-8'))
             # Рекурсивно извлекаем текст из JSON
             return FileProcessor._extract_text_from_json(data)
@@ -98,13 +97,13 @@ class TrainingDataGenerator:
     def __init__(self, ollama_host: str = "http://ollama:11434"):
         self.ollama_host = ollama_host
     
-async def generate_example(self, text: str) -> Dict[str, Any]:
-    """Генерирует обучающий пример для текста"""
-    import httpx
-    import re
-    import json
-    
-    prompt = f"""Ты — помощник по созданию обучающих данных. Проанализируй текст и верни JSON с оценкой.
+    async def generate_example(self, text: str) -> Dict[str, Any]:
+        """Генерирует обучающий пример для текста"""
+        import httpx
+        import re
+        import json
+        
+        prompt = f"""Ты — помощник по созданию обучающих данных. Проанализируй текст и верни JSON с оценкой.
 
 Текст: {text[:1500]}
 
@@ -121,57 +120,57 @@ async def generate_example(self, text: str) -> Dict[str, Any]:
 Если есть проблемы — укажи issues с type, description, suggestion.
 Отвечай ТОЛЬКО JSON."""
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        response = await client.post(
-            f"{self.ollama_host}/api/chat",
-            json={
-                "model": "qwen2.5:7b",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "top_p": 0.9
-                }
-            }
-        )
-        
-        if response.status_code == 200:
-            content = response.json()["message"]["content"]
-            
-            # Очищаем ответ от возможных проблем
-            # Удаляем markdown код блоки
-            content = re.sub(r'```json\s*', '', content)
-            content = re.sub(r'```\s*', '', content)
-            
-            # Ищем JSON
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-                # Удаляем невалидные управляющие символы
-                json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError as e:
-                    print(f"⚠️ Ошибка парсинга JSON: {e}")
-                    print(f"Проблемный JSON: {json_str[:200]}")
-                    # Возвращаем заглушку
-                    return {
-                        "is_correct": True,
-                        "confidence": 0.5,
-                        "issues": [],
-                        "corrected_text": text,
-                        "analysis": "Ошибка парсинга, пример пропущен"
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{self.ollama_host}/api/chat",
+                json={
+                    "model": "qwen2.5:7b",
+                    "messages": [
+                        {"role": "user", "content": prompt}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9
                     }
-        
-        return {
-            "is_correct": True,
-            "confidence": 0.5,
-            "issues": [],
-            "corrected_text": text,
-            "analysis": "Автоматически сгенерированный пример"
-        }
+                }
+            )
+            
+            if response.status_code == 200:
+                content = response.json()["message"]["content"]
+                
+                # Очищаем ответ от возможных проблем
+                # Удаляем markdown код блоки
+                content = re.sub(r'```json\s*', '', content)
+                content = re.sub(r'```\s*', '', content)
+                
+                # Ищем JSON
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    # Удаляем невалидные управляющие символы
+                    json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Ошибка парсинга JSON: {e}")
+                        print(f"Проблемный JSON: {json_str[:200]}")
+                        # Возвращаем заглушку
+                        return {
+                            "is_correct": True,
+                            "confidence": 0.5,
+                            "issues": [],
+                            "corrected_text": text,
+                            "analysis": "Ошибка парсинга, пример пропущен"
+                        }
+            
+            return {
+                "is_correct": True,
+                "confidence": 0.5,
+                "issues": [],
+                "corrected_text": text,
+                "analysis": "Автоматически сгенерированный пример"
+            }
     
     async def process_file(self, file_content: bytes, filename: str) -> List[Dict]:
         """Обрабатывает файл и генерирует обучающие примеры"""
@@ -182,36 +181,17 @@ async def generate_example(self, text: str) -> Dict[str, Any]:
         examples = []
         for i, para in enumerate(paragraphs):
             if len(para) > 50:  # Игнорируем слишком короткие
-                print(f"  Генерация примера {i+1}/{len(paragraphs)}...")
-                response = await self.generate_example(para)
-                examples.append({
-                    "id": f"{Path(filename).stem}_{i}",
-                    "instruction": para,
-                    "response": response,
-                    "source_file": filename
-                })
+                try:
+                    print(f"  Генерация примера {i+1}/{len(paragraphs)}...")
+                    response = await self.generate_example(para)
+                    examples.append({
+                        "id": f"{Path(filename).stem}_{i}",
+                        "instruction": para,
+                        "response": response,
+                        "source_file": filename
+                    })
+                except Exception as e:
+                    print(f"  ⚠️ Ошибка генерации примера {i+1}: {e}")
+                    continue
         
         return examples
-    
-    async def process_file(self, file_content: bytes, filename: str) -> List[Dict]:
-        """Обрабатывает файл и генерирует обучающие примеры"""
-    text = await FileProcessor.extract_text(file_content, filename)
-    paragraphs = FileProcessor.split_into_paragraphs(text)
-    
-    examples = []
-    for i, para in enumerate(paragraphs):
-        if len(para) > 50:
-            try:
-                print(f"  Генерация примера {i+1}/{len(paragraphs)}...")
-                response = await self.generate_example(para)
-                examples.append({
-                    "id": f"{Path(filename).stem}_{i}",
-                    "instruction": para,
-                    "response": response,
-                    "source_file": filename
-                })
-            except Exception as e:
-                print(f"  ⚠️ Ошибка генерации примера {i+1}: {e}")
-                continue
-    
-    return examples

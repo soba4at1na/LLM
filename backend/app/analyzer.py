@@ -30,26 +30,48 @@ class TextAnalyzer:
                     "model": model,
                     "messages": [
                         {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": f"Текст: {text[:3000]}"}
+                        {"role": "user", "content": f"Текст: {text[:2000]}"}
                     ],
                     "stream": False,
                     "options": {
                         "temperature": 0.1,
-                        "top_p": 0.9
+                        "top_p": 0.9,
+                        "num_ctx": 4096
                     }
                 }
             )
             
             if response.status_code == 200:
                 content = response.json()["message"]["content"]
+                
+                # Очищаем ответ от markdown
+                content = re.sub(r'```json\s*', '', content)
+                content = re.sub(r'```\s*', '', content)
+                
+                # Ищем JSON
                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
                 if json_match:
-                    return json.loads(json_match.group())
+                    json_str = json_match.group()
+                    # Удаляем невалидные символы
+                    json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_str)
+                    try:
+                        return json.loads(json_str)
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Ошибка парсинга JSON: {e}")
+                        print(f"Проблемный JSON: {json_str[:200]}")
+                        # Возвращаем fallback
+                        return {
+                            "is_correct": False,
+                            "confidence": 0.5,
+                            "issues": [],
+                            "corrected_text": text,
+                            "analysis": f"Ошибка парсинга: {str(e)[:100]}"
+                        }
             
             return {
                 "is_correct": False,
                 "confidence": 0.5,
                 "issues": [],
                 "corrected_text": text,
-                "analysis": "Ошибка анализа"
+                "analysis": "Ошибка ответа модели"
             }

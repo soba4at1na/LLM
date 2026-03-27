@@ -4,8 +4,6 @@ from pathlib import Path
 import json
 import aiofiles
 from datetime import datetime
-import os
-import subprocess
 import httpx
 
 from .models import AnalysisRequest, AnalysisResponse, SystemMetrics
@@ -233,69 +231,20 @@ async def get_dataset_stats():
 
 @app.get("/gpu-status")
 async def get_gpu_status():
-    """Получить статус GPU через Ollama"""
+    """Получить статус GPU через Ollama API"""
     try:
-        # Проверяем, что Ollama доступен
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get("http://ollama:11434/api/tags")
-            if response.status_code != 200:
-                return {"available": False, "message": "Ollama not available"}
-        
-        # Проверяем через nvidia-smi внутри контейнера ollama
-        import subprocess
-        result = subprocess.run(
-            ["docker", "exec", "ollama", "nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split(',')
-            if len(parts) >= 3:
-                return {
-                    "available": True,
-                    "utilization": int(parts[0].replace('%', '').strip()),
-                    "memory_used_mb": int(parts[1].replace('MiB', '').strip()),
-                    "memory_total_mb": int(parts[2].replace('MiB', '').strip()),
-                    "memory_used_gb": round(int(parts[1].replace('MiB', '').strip()) / 1024, 1),
-                    "memory_total_gb": round(int(parts[2].replace('MiB', '').strip()) / 1024, 1),
-                    "message": "GPU active via Ollama"
-                }
-    except Exception as e:
-        print(f"GPU status error: {e}")
-    
-    # Если не удалось получить данные через nvidia-smi, возвращаем статус по доступности Ollama
-    return {
-        "available": True,  # Ollama доступен, значит GPU используется
-        "utilization": 0,
-        "message": "GPU is used by Ollama (check nvidia-smi for details)"
-    }
-
-
-@app.get("/ollama/status")
-async def get_ollama_status():
-    """Проверить доступность Ollama"""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get("http://ollama:11434/api/tags", timeout=5)
             if response.status_code == 200:
-                return {"available": True, "message": "Ollama is running"}
-    except:
-        pass
-    return {"available": False, "message": "Ollama is not available"}
-
-
-@app.get("/analysis/status/{filename}")
-async def get_analysis_status(filename: str):
-    """Статус анализа файла (для прогресса)"""
-    result_path = RESULTS_DIR / f"test_{filename}.json"
-    if result_path.exists():
-        async with aiofiles.open(result_path, 'r', encoding='utf-8') as f:
-            data = json.loads(await f.read())
-            return {
-                "status": "completed",
-                "current": len(data),
-                "total": len(data)
-            }
-    return {"status": "pending", "current": 0, "total": 0}
+                tags = response.json()
+                models = tags.get('models', [])
+                if models:
+                    return {
+                        "available": True,
+                        "message": "GPU активен через Ollama",
+                        "models": [m.get('name', 'qwen2.5:7b') for m in models]
+                    }
+    except Exception as e:
+        print(f"Ollama error: {e}")
+    
+    return {"available": False, "message": "Ollama не доступен"}
