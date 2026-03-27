@@ -1,253 +1,177 @@
-import asyncio
+import requests
 import json
 import re
-from typing import List, Dict, Tuple
-from dataclasses import dataclass, field
 from pathlib import Path
+from typing import List, Dict, Any
 
-try:
-    from llama_cpp import Llama
-except ImportError:
-    print("⚠️ Установите библиотеку: pip install llama-cpp-python")
-    exit(1)
+class OllamaAnalyzer:
+    def __init__(self, model="qwen2.5:7b", host="http://localhost:11434"):
+        self.model = model
+        self.host = host
+        self.system_prompt = """Ты — технический анализатор текстов. Отвечай ТОЛЬКО JSON, без пояснений.
 
-MODEL_PATH = r"C:\Model\Qwen3.5-9B-Q4_K_M.gguf"
-CONTEXT_SIZE = 4096
-MAX_TOKENS = 512
-
-
-@dataclass
-class TextAnalysis:
-    id: int
-    original_text: str
-    is_correct: bool = False
-    confidence: float = 0.0
-    issues: List[Dict] = field(default_factory=list)
-    corrected_text: str = ""
-    analysis: str = ""
-
-
-def create_analysis_prompt() -> str:
-    return """<|im_start|>system
-/no_think
-Ты — технический аналитик ИТ-документации. Анализируй технические тексты (определения, документация, спецификации) на наличие проблем.
-
-ТИПЫ ПРОБЛЕМ:
-- redundancy: избыточность (повтор слов/мыслей)
-- tautology: тавтология (однокоренные слова)
-- ambiguity: неясность/двусмысленность
-- wordiness: многословность
-- imprecise_terminology: неточная терминология
-- grammatical: грамматическая ошибка
-
-Формат ответа (JSON):
+Формат:
 {
   "is_correct": true/false,
   "confidence": 0.0-1.0,
-  "issues": [
-    {
-      "type": "тип проблемы",
-      "position": "где в тексте",
-      "description": "описание проблемы",
-      "suggestion": "конкретное исправление"
-    }
-  ],
-  "corrected_text": "исправленный вариант всего текста",
-  "analysis": "краткий технический комментарий (1-2 предложения)"
-}<|im_end|>
-<|im_start|>user
-Проанализируй технический текст:
+  "issues": [],
+  "corrected_text": "текст",
+  "analysis": "комментарий"
+}
 
-"""
+Пример:
+Text: Протокол TCP обеспечивает надежную доставку данных.
+Response: {"is_correct": true, "confidence": 0.95, "issues": [], "corrected_text": "Протокол TCP обеспечивает надежную доставку данных.", "analysis": "Текст корректен"}
 
-
-class ThreadSafeLLMClient:
-    def __init__(self, model_path: str, n_ctx: int = CONTEXT_SIZE):
-        print(f"🚀 Загрузка модели: {model_path}...")
-        self.llm = Llama(
-            model_path=model_path,
-            n_gpu_layers=0,
-            n_ctx=n_ctx,
-            verbose=False
-        )
-        self._lock = asyncio.Lock()
-
-    async def generate(self, prompt: str) -> str:
-        async with self._lock:
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._generate_sync, prompt)
-
-    def _generate_sync(self, prompt: str) -> str:
-        try:
-            response = self.llm(
-                prompt,
-                max_tokens=MAX_TOKENS,
-                temperature=0.1,
-                stop=["<|im_end|>", "<|im_start|>"]
-            )
-            if isinstance(response, dict) and 'choices' in response:
-                return response['choices'][0]['text'].strip()
-            return str(response).strip()
-        except Exception as e:
-            print(f"⚠️ Ошибка: {e}")
-            return ""
-
-
-class TechnicalTextAnalyzer:
-    def __init__(self, llm_client: ThreadSafeLLMClient):
-        self.llm = llm_client
-        self.prompt_template = create_analysis_prompt()
-
-    async def analyze_text(self, text_id: int, text: str) -> TextAnalysis:
-        result = TextAnalysis(id=text_id, original_text=text)
-        
-        prompt = self.prompt_template + text + "<|im_end|>\n<|im_start|>assistant\n"
-        
-        try:
-            response = await self.llm.generate(prompt)
-            
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                result.is_correct = data.get('is_correct', False)
-                result.confidence = data.get('confidence', 0.0)
-                result.issues = data.get('issues', [])
-                result.corrected_text = data.get('corrected_text', '')
-                result.analysis = data.get('analysis', '')
-            else:
-                result.is_correct = True
-                result.confidence = 0.5
-                result.analysis = response[:200]
-
-        except Exception as e:
-            print(f"⚠️ Ошибка анализа текста {text_id}: {e}")
-
-        return result
-
-
-def print_statistics(results: List[TextAnalysis]):
-    total = len(results)
-    correct = sum(1 for r in results if r.is_correct)
-    problematic = total - correct
+Теперь анализируй текст и возвращай ТОЛЬКО JSON."""
     
-    issue_types: Dict[str, int] = {}
-    for r in results:
-        for issue in r.issues:
-            t = issue.get('type', 'unknown')
-            issue_types[t] = issue_types.get(t, 0) + 1
+    def analyze_text(self, text: str) -> Dict[str, Any]:
+        """Анализирует текст и возвращает результат в виде словаря"""
+        try:
+            response = requests.post(
+                f"{self.host}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": f"Text: {text}"}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                        "top_p": 0.9,
+                        "num_ctx": 8192
+                    }
+                },
+                timeout=120
+            )
+            
+            if response.status_code == 200:
+                content = response.json()["message"]["content"]
+                # Извлекаем JSON из ответа
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    try:
+                        return json.loads(json_match.group())
+                    except json.JSONDecodeError as e:
+                        print(f"⚠️ Ошибка парсинга JSON: {e}")
+                        return self._fallback_result(text, content[:200])
+                else:
+                    return self._fallback_result(text, content[:200])
+            else:
+                return self._fallback_result(text, f"API error: {response.status_code}")
+                
+        except Exception as e:
+            print(f"⚠️ Ошибка подключения: {e}")
+            return self._fallback_result(text, str(e))
+    
+    def _fallback_result(self, text: str, error_msg: str) -> Dict[str, Any]:
+        """Возвращает результат по умолчанию при ошибке"""
+        return {
+            "is_correct": False,
+            "confidence": 0.5,
+            "issues": [],
+            "corrected_text": text,
+            "analysis": f"Ошибка: {error_msg[:100]}"
+        }
 
+
+def analyze_texts(texts_data: List[Dict]) -> List[Dict]:
+    """Анализирует список текстов"""
+    analyzer = OllamaAnalyzer()
+    results = []
+    
+    for i, item in enumerate(texts_data):
+        text = item.get('text', '')
+        print(f"📝 [{i+1}/{len(texts_data)}] Анализ: {text[:50]}...")
+        
+        result = analyzer.analyze_text(text)
+        result['id'] = item.get('id', i)
+        result['original_text'] = text
+        results.append(result)
+        
+        # Выводим статус
+        status = "✅" if result.get('is_correct') else "⚠️"
+        print(f"   {status} Уверенность: {result.get('confidence', 0):.2f}")
+    
+    return results
+
+
+def print_statistics(results: List[Dict]):
+    """Выводит статистику анализа"""
+    total = len(results)
+    correct = sum(1 for r in results if r.get('is_correct', False))
+    
     print("\n" + "=" * 70)
     print("📊 СТАТИСТИКА АНАЛИЗА")
     print("=" * 70)
-    print(f"\n{'─' * 70}")
     print(f"  📁 Всего текстов:     {total}")
     print(f"  ✅ Корректных:        {correct} ({correct/total*100:.1f}%)")
-    print(f"  ⚠️  С проблемами:      {problematic} ({problematic/total*100:.1f}%)")
-    print(f"{'─' * 70}")
+    print(f"  ⚠️  С проблемами:      {total-correct} ({(total-correct)/total*100:.1f}%)")
     
-    if issue_types:
-        print("\n  📋 ТИПЫ ПРОБЛЕМ:")
-        print(f"  {'─' * 70}")
-        for issue_type, count in sorted(issue_types.items(), key=lambda x: -x[1]):
-            bar = "█" * count
-            print(f"    {issue_type:<25} {bar} {count}")
-    
-    print(f"\n{'─' * 70}")
-    print(f"  📈 Средняя уверенность: {sum(r.confidence for r in results)/total:.2f}")
-    print(f"{'─' * 70}")
-
-
-def print_detailed_results(results: List[TextAnalysis]):
-    print("\n" + "=" * 70)
-    print("📋 ДЕТАЛЬНЫЕ РЕЗУЛЬТАТЫ")
-    print("=" * 70)
-
+    # Собираем статистику по типам проблем
+    issue_stats = {}
     for r in results:
-        status = "✅" if r.is_correct else "⚠️"
-        print(f"\n{status} [{r.id}] {r.original_text[:60]}...")
-        print(f"    Уверенность: {r.confidence:.2f}")
-        
-        if r.issues:
-            print(f"    Проблемы:")
-            for issue in r.issues:
-                print(f"      • [{issue.get('type', '?')}] {issue.get('description', '')}")
-                if issue.get('suggestion'):
-                    print(f"        → {issue.get('suggestion')}")
-        
-        if r.corrected_text and not r.is_correct:
-            print(f"    💡 Исправление:")
-            print(f"       {r.corrected_text[:80]}...")
-        
-        if r.analysis:
-            print(f"    📝 {r.analysis[:80]}...")
+        issues = r.get('issues', [])
+        if isinstance(issues, list):
+            for issue in issues:
+                if isinstance(issue, dict):
+                    issue_type = issue.get('type', 'unknown')
+                    issue_stats[issue_type] = issue_stats.get(issue_type, 0) + 1
+                elif isinstance(issue, str):
+                    issue_stats[issue] = issue_stats.get(issue, 0) + 1
+        elif isinstance(issues, str):
+            issue_stats[issues] = issue_stats.get(issues, 0) + 1
+    
+    if issue_stats:
+        print("\n  📋 Типы проблем:")
+        for issue_type, count in sorted(issue_stats.items(), key=lambda x: -x[1]):
+            print(f"    {issue_type}: {count}")
 
 
-async def main():
-    config = {
-        "model_path": MODEL_PATH,
-        "n_ctx": CONTEXT_SIZE
-    }
-
+def main():
     print("=" * 70)
-    print("🔬 ТЕХНИЧЕСКИЙ АНАЛИЗАТОР ТЕКСТОВ")
+    print("🔬 ТЕХНИЧЕСКИЙ АНАЛИЗАТОР ТЕКСТОВ (Ollama)")
     print("=" * 70)
-
-    llm_client = ThreadSafeLLMClient(config['model_path'], config['n_ctx'])
-    analyzer = TechnicalTextAnalyzer(llm_client)
-
+    
+    # Проверка доступности Ollama
+    try:
+        response = requests.get("http://localhost:11434/api/tags")
+        if response.status_code != 200:
+            print("⚠️ Ollama не доступен. Запустите контейнер:")
+            print("   docker run -d --gpus=all -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama")
+            return
+        models = response.json().get('models', [])
+        print(f"✅ Ollama доступен. Модели: {[m['name'] for m in models]}")
+    except Exception as e:
+        print(f"⚠️ Не удалось подключиться к Ollama: {e}")
+        return
+    
+    # Загружаем тестовые тексты
     texts_path = Path(__file__).parent / "datasets" / "test_texts.json"
+    if not texts_path.exists():
+        print(f"⚠️ Файл {texts_path} не найден")
+        return
+    
     with open(texts_path, 'r', encoding='utf-8') as f:
         texts_data = json.load(f)
-
+    
     print(f"\n📂 Загружено {len(texts_data)} технических текстов")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-    results: List[TextAnalysis] = []
     
-    for i, item in enumerate(texts_data):
-        print(f"📝 [{i + 1}/{len(texts_data)}] Анализ: {item['text'][:50]}...")
-        result = await analyzer.analyze_text(item['id'], item['text'])
-        results.append(result)
-
+    # Анализируем тексты
+    results = analyze_texts(texts_data)
+    
+    # Выводим статистику
     print_statistics(results)
-    print_detailed_results(results)
-
-    output_path = Path(__file__).parent / "analysis_results.json"
-    output_data = {
-        "summary": {
-            "total": len(results),
-            "correct": sum(1 for r in results if r.is_correct),
-            "problematic": sum(1 for r in results if not r.is_correct),
-            "avg_confidence": sum(r.confidence for r in results) / len(results)
-        },
-        "results": [
-            {
-                "id": r.id,
-                "original": r.original_text,
-                "is_correct": r.is_correct,
-                "confidence": r.confidence,
-                "issues": r.issues,
-                "corrected": r.corrected_text,
-                "analysis": r.analysis
-            }
-            for r in results
-        ]
-    }
     
+    # Сохраняем результаты
+    output_path = Path(__file__).parent / "analysis_results.json"
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
+        json.dump(results, f, ensure_ascii=False, indent=2)
     
     print(f"\n💾 Результаты сохранены в: {output_path}")
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n\n🛑 Прервано пользователем")
-    except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
-        import traceback
-        traceback.print_exc(
-
-        )
+    main()
