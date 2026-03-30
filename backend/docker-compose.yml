@@ -55,11 +55,6 @@ services:
 volumes:
   postgres_data:
 
-
-
-
-
-
 networks:
   llm_network:
     driver: bridge
