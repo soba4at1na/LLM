@@ -1,4 +1,5 @@
-# backend/docker-compose.yml
+version: '3.8'
+
 services:
   # 🐘 PostgreSQL
   db:
@@ -11,34 +12,32 @@ services:
       POSTGRES_DB: ${DB_NAME:-llm_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ports:
-      - "5432:5432"
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - llm_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-llm_user} -d ${DB_NAME:-llm_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - llm_network
 
   # 🐍 FastAPI Backend
   backend:
-    build: .
+    build: ./backend
     container_name: llm_backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-llm_user}:${DB_PASSWORD:-llm_secure_pass}@db:5432/${DB_NAME:-llm_db}
-      SECRET_KEY: ${SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY:-change_me_in_production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       MODEL_PATH: ${MODEL_PATH:-/app/models/model.gguf}
       DISABLE_LLM: ${DISABLE_LLM:-false}
-      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000","http://127.0.0.1:3000"]}
+      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost","http://127.0.0.1"]'
     volumes:
-      - ./app:/app/app:ro
-      - ./models:/app/models:ro
+      - ./backend/app:/app/app:ro
+      - ./backend/models:/app/models:ro
     depends_on:
       db:
         condition: service_healthy
@@ -51,6 +50,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # 🌐 Frontend (nginx)
+  frontend:
+    image: nginx:alpine
+    container_name: llm_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - llm_network
 
 volumes:
   postgres_data:

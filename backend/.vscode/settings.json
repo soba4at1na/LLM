@@ -1,0 +1,14 @@
+{
+  "python.analysis.extraPaths": ["./app"],
+  "python.analysis.ignore": [
+    "sqlalchemy",
+    "sqlalchemy.ext.asyncio",
+    "sqlalchemy.dialects.postgresql",
+    "sqlalchemy.orm",
+    "jose",
+    "passlib",
+    "asyncpg",
+    "llama_cpp"
+  ],
+  "python.analysis.diagnosticMode": "workspace"
+}

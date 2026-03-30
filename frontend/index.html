@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="LLM Document Quality Checker — анализ технической документации">
+  <meta name="theme-color" content="#6366f1">
+  
+  <title>LLM Document Checker — Вход</title>
+  
+  <!-- 🎨 Styles -->
+  <link rel="stylesheet" href="/css/style.css">
+  
+  <!-- 🔖 Favicon -->
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🤖%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <main class="container">
+    
+    <!-- 🔐 Форма входа -->
+    <section id="login-form" aria-labelledby="login-title">
+      <h1 id="login-title"><span class="emoji">🔐</span>Вход в систему</h1>
+      
+      <div id="login-error" class="alert error" role="alert" aria-live="polite"></div>
+      
+      <form id="login" novalidate>
+        <div class="form-group">
+          <label for="login-username">Email или имя пользователя</label>
+          <input 
+            type="text" 
+            id="login-username" 
+            name="username"
+            required 
+            placeholder="user@example.com"
+            autocomplete="username"
+            minlength="3"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="login-password">Пароль</label>
+          <input 
+            type="password" 
+            id="login-password" 
+            name="password"
+            required 
+            placeholder="••••••••"
+            autocomplete="current-password"
+            minlength="8"
+          />
+        </div>
+        
+        <button type="submit" id="login-btn">
+          <span class="btn-text">Войти</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+      
+      <p class="toggle">
+        Нет аккаунта? 
+        <a href="#" data-show="register" tabindex="0">Зарегистрироваться</a>
+      </p>
+    </section>
+
+    <!-- 📝 Форма регистрации -->
+    <section id="register-form" class="hidden" aria-labelledby="register-title">
+      <h1 id="register-title"><span class="emoji">📝</span>Регистрация</h1>
+      
+      <div id="register-error" class="alert error" role="alert" aria-live="polite"></div>
+      <div id="register-success" class="alert success" role="status" aria-live="polite"></div>
+      
+      <form id="register" novalidate>
+        <div class="form-group">
+          <label for="reg-email">Email</label>
+          <input 
+            type="email" 
+            id="reg-email" 
+            name="email"
+            required 
+            placeholder="user@example.com"
+            autocomplete="email"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="reg-username">Имя пользователя</label>
+          <input 
+            type="text" 
+            id="reg-username" 
+            name="username"
+            required 
+            minlength="3"
+            maxlength="50"
+            placeholder="myuser"
+            autocomplete="username"
+            pattern="[a-zA-Z0-9_-]+"
+            title="Только буквы, цифры, _ и -"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="reg-password">Пароль</label>
+          <input 
+            type="password" 
+            id="reg-password" 
+            name="password"
+            required 
+            minlength="8"
+            placeholder="•••••••• (мин. 8 символов)"
+            autocomplete="new-password"
+          />
+        </div>
+        
+        <button type="submit" id="register-btn">
+          <span class="btn-text">Зарегистрироваться</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+      
+      <p class="toggle">
+        Уже есть аккаунт? 
+        <a href="#" data-show="login" tabindex="0">Войти</a>
+      </p>
+    </section>
+
+    <!-- 👤 Дашборд (после входа) -->
+    <section id="dashboard" class="hidden" aria-labelledby="dashboard-title">
+      <h1 id="dashboard-title"><span class="emoji">👋</span>Добро пожаловать!</h1>
+      
+      <div class="status-badge">
+        <span>✓ Авторизован</span>
+      </div>
+      
+      <div class="user-info" aria-label="Информация о пользователе">
+        <p><strong>Имя:</strong> <span id="user-username">—</span></p>
+        <p><strong>Email:</strong> <span id="user-email">—</span></p>
+        <p><strong>ID:</strong> <span id="user-id" class="text-muted">—</span></p>
+      </div>
+      
+      <div class="coming-soon">
+        🚀 <strong>Скоро:</strong> Загрузка документов для анализа с помощью ИИ
+      </div>
+      
+      <button id="logout-btn" class="danger">
+        <span class="btn-text">Выйти</span>
+      </button>
+    </section>
+
+  </main>
+
+  <!-- 🧠 Application Logic -->
+  <script src="/js/app.js" type="module"></script>
+  
+  <!-- 🔧 Service Worker (опционально для PWA) -->
+  <script>
+    // Регистрация Service Worker для оффлайн-поддержки (будущее)
+    if ('serviceWorker' in navigator && location.hostname === 'localhost') {
+      // navigator.serviceWorker.register('/sw.js')
+      //   .then(reg => console.log('✓ SW registered:', reg.scope))
+      //   .catch(err => console.warn('✗ SW failed:', err));
+    }
+  </script>
+</body>
+</html>
