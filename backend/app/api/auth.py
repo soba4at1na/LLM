@@ -1,12 +1,12 @@
 # backend/app/api/auth.py
 from datetime import timedelta
-from typing import Annotated, Optional  # ✅ Исправлено: добавлен Optional
-import re
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -21,83 +21,69 @@ from app.utils.auth import (
 router = APIRouter()
 
 
-# === Pydantic Schemas ===
-from pydantic import BaseModel, Field, field_validator
-
-
+# ====================== Schemas ======================
 class UserRegister(BaseModel):
-    """Схема для регистрации"""
-    email: str = Field(..., max_length=255)  # ✅ str вместо EmailStr
+    email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=8)
-    
+
     @field_validator('email')
     @classmethod
     def validate_email(cls, v: str) -> str:
-        """Валидация email через regex"""
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(pattern, v):
+        import re
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
             raise ValueError('Неверный формат email')
         return v.lower()
 
 
 class UserResponse(BaseModel):
-    """Ответ с данными пользователя"""
     id: str
     email: str
     username: str
     is_active: bool
-    
+
     class Config:
         from_attributes = True
 
 
 class Token(BaseModel):
-    """JWT Token ответ"""
     access_token: str
     token_type: str = "bearer"
 
 
-# === Endpoints ===
-
+# ====================== Endpoints ======================
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserRegister,
     db: AsyncSession = Depends(get_db)
 ):
     """Регистрация нового пользователя"""
-    # 🔍 Проверка на дубликаты
-    email_query = select(User).where(User.email == user_data.email)
-    username_query = select(User).where(User.username == user_data.username)
-    
-    existing_email = await db.scalar(email_query)
-    existing_username = await db.scalar(username_query)
-    
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Пользователь с таким email уже существует"
+    try:
+        if await db.scalar(select(User).where(User.email == user_data.email)):
+            raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
+
+        if await db.scalar(select(User).where(User.username == user_data.username)):
+            raise HTTPException(status_code=400, detail="Такое имя пользователя уже занято")
+
+        new_user = User(
+            email=user_data.email,
+            username=user_data.username,
+            hashed_password=get_password_hash(user_data.password),
+            is_active=True,
+            is_verified=False,
         )
-    if existing_username:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Такое имя пользователя уже занято"
-        )
-    
-    # 🔐 Создание пользователя
-    new_user = User(
-        email=user_data.email,
-        username=user_data.username,
-        hashed_password=get_password_hash(user_data.password),
-        is_active=True,
-        is_verified=False,
-    )
-    
-    db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
-    
-    return new_user
+
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+
+        return new_user   # Pydantic сам вызовет from_attributes
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Ошибка регистрации: {str(e)}")
 
 
 @router.post("/login", response_model=Token)
@@ -105,32 +91,27 @@ async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: AsyncSession = Depends(get_db)
 ):
-    """Вход в систему — возвращает JWT access token"""
-    # 🔍 Поиск пользователя по email или username
-    query = select(User).where(
-        (User.email == form_data.username) | (User.username == form_data.username)
+    """Вход в систему"""
+    user = await db.scalar(
+        select(User).where(
+            (User.email == form_data.username) | (User.username == form_data.username)
+        )
     )
-    user = await db.scalar(query)
-    
+
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный email/username или пароль",
+            status_code=401,
+            detail="Неверный email или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Аккаунт деактивирован"
-        )
-    
-    # 🎫 Создание токена
+        raise HTTPException(status_code=400, detail="Аккаунт деактивирован")
+
     access_token = create_access_token(
-        data={"sub": str(user.id), "username": user.username},
-        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        data={"sub": str(user.id), "username": user.username}
     )
-    
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -139,10 +120,15 @@ async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     """Получение данных текущего пользователя"""
-    return current_user
+    # Явно преобразуем UUID в строку
+    return {
+        "id": str(current_user.id),
+        "email": current_user.email,
+        "username": current_user.username,
+        "is_active": current_user.is_active
+    }
 
 
 @router.post("/logout")
 async def logout():
-    """Выход из системы (клиент должен удалить токен)"""
-    return {"message": "Успешный выход"}
+    return {"message": "Успешный выход из системы"}

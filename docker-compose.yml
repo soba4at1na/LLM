@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # 🐘 PostgreSQL
   db:
@@ -30,26 +28,17 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-llm_user}:${DB_PASSWORD:-llm_secure_pass}@db:5432/${DB_NAME:-llm_db}
-      SECRET_KEY: ${SECRET_KEY:-change_me_in_production}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      MODEL_PATH: ${MODEL_PATH:-/app/models/model.gguf}
+      SECRET_KEY: ${SECRET_KEY}
+      MODEL_PATH: /app/models/qwen2.5-14b-instruct-uncensored-q5_k_m.gguf
       DISABLE_LLM: ${DISABLE_LLM:-false}
-      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000","http://localhost","http://127.0.0.1"]'
     volumes:
-      - ./backend/app:/app/app:ro
-      - ./backend/models:/app/models:ro
+      - ./backend/app:/app/app
+      - ./backend/app/models:/app/models:ro     # ← Вот это главное исправление
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - llm_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
   # 🌐 Frontend (nginx)
   frontend:

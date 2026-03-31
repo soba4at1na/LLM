@@ -54,12 +54,12 @@ async def lifespan(app: FastAPI):
 # 🎯 Создание приложения
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    description="Корпоративный инструмент для анализа технической документации",
+    description="...",
     version="0.1.0",
     lifespan=lifespan,
+    debug=True,                    # ← Добавь эту строку
     docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    redoc_url="/redoc"
 )
 
 # 🌐 CORS Middleware
