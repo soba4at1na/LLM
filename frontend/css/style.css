@@ -1,4 +1,3 @@
-/* ===== CSS Variables ===== */
 :root {
   --primary: #6366f1;
   --primary-hover: #4f46e5;
@@ -19,7 +18,6 @@
   --transition: all 0.2s ease;
 }
 
-/* ===== Reset & Base ===== */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -27,7 +25,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg-gradient);
   min-height: 100vh;
   display: flex;
@@ -38,7 +36,6 @@ body {
   line-height: 1.5;
 }
 
-/* ===== Container ===== */
 .container {
   background: var(--card-bg);
   backdrop-filter: blur(10px);
@@ -56,7 +53,6 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* ===== Typography ===== */
 h1 {
   text-align: center;
   margin-bottom: 1.5rem;
@@ -64,11 +60,6 @@ h1 {
   font-size: 1.5rem;
 }
 
-h1 .emoji {
-  margin-right: 0.5rem;
-}
-
-/* ===== Forms ===== */
 .form-group {
   margin-bottom: 1rem;
 }
@@ -108,7 +99,6 @@ input:disabled {
   cursor: not-allowed;
 }
 
-/* ===== Buttons ===== */
 button {
   width: 100%;
   padding: 0.75rem 1rem;
@@ -171,7 +161,6 @@ button.loading .btn-text {
   to { transform: rotate(360deg); }
 }
 
-/* ===== Alerts ===== */
 .alert {
   padding: 0.75rem 1rem;
   border-radius: 10px;
@@ -198,13 +187,6 @@ button.loading .btn-text {
   color: #86efac;
 }
 
-.alert.info {
-  background: rgba(59, 130, 246, 0.15);
-  border: 1px solid #3b82f6;
-  color: #93c5fd;
-}
-
-/* ===== Toggle Links ===== */
 .toggle {
   text-align: center;
   margin-top: 1.25rem;
@@ -225,12 +207,10 @@ button.loading .btn-text {
   text-decoration: underline;
 }
 
-/* ===== Hidden Utility ===== */
 .hidden {
   display: none !important;
 }
 
-/* ===== Dashboard ===== */
 #dashboard {
   text-align: center;
 }
@@ -296,29 +276,24 @@ button.loading .btn-text {
   border-left: 3px solid var(--primary);
 }
 
-/* ===== Responsive ===== */
 @media (max-width: 480px) {
   .container {
     padding: 1.5rem;
     margin: 10px;
   }
-  
   h1 {
     font-size: 1.25rem;
   }
-  
   input, button {
     padding: 0.65rem 1rem;
   }
 }
 
-/* ===== Focus Visible ===== */
 :focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-/* ===== Reduce Motion ===== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

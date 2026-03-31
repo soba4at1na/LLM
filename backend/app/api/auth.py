@@ -1,6 +1,6 @@
-# backend/app/api/auth.py
 from datetime import timedelta
 from typing import Annotated
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -21,7 +21,6 @@ from app.utils.auth import (
 router = APIRouter()
 
 
-# ====================== Schemas ======================
 class UserRegister(BaseModel):
     email: str = Field(..., max_length=255)
     username: str = Field(..., min_length=3, max_length=50)
@@ -30,9 +29,9 @@ class UserRegister(BaseModel):
     @field_validator('email')
     @classmethod
     def validate_email(cls, v: str) -> str:
-        import re
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
-            raise ValueError('Неверный формат email')
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(pattern, v):
+            raise ValueError('Invalid email format')
         return v.lower()
 
 
@@ -42,8 +41,7 @@ class UserResponse(BaseModel):
     username: str
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = {'from_attributes': True}
 
 
 class Token(BaseModel):
@@ -51,65 +49,74 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
-# ====================== Endpoints ======================
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
-    user_data: UserRegister,
+    user_: UserRegister,
     db: AsyncSession = Depends(get_db)
 ):
-    """Регистрация нового пользователя"""
-    try:
-        if await db.scalar(select(User).where(User.email == user_data.email)):
-            raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
+    email_query = select(User).where(User.email == user_.email)
+    username_query = select(User).where(User.username == user_.username)
 
-        if await db.scalar(select(User).where(User.username == user_data.username)):
-            raise HTTPException(status_code=400, detail="Такое имя пользователя уже занято")
+    existing_email = await db.scalar(email_query)
+    existing_username = await db.scalar(username_query)
 
-        new_user = User(
-            email=user_data.email,
-            username=user_data.username,
-            hashed_password=get_password_hash(user_data.password),
-            is_active=True,
-            is_verified=False,
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists"
+        )
+    if existing_username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken"
         )
 
-        db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
+    new_user = User(
+        email=user_.email,
+        username=user_.username,
+        hashed_password=get_password_hash(user_.password),
+        is_active=True,
+        is_verified=False,
+    )
 
-        return new_user   # Pydantic сам вызовет from_attributes
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ошибка регистрации: {str(e)}")
+    return UserResponse(
+        id=str(new_user.id),
+        email=new_user.email,
+        username=new_user.username,
+        is_active=new_user.is_active
+    )
 
 
 @router.post("/login", response_model=Token)
 async def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    form_: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: AsyncSession = Depends(get_db)
 ):
-    """Вход в систему"""
-    user = await db.scalar(
-        select(User).where(
-            (User.email == form_data.username) | (User.username == form_data.username)
-        )
+    query = select(User).where(
+        (User.email == form_.username) | (User.username == form_.username)
     )
+    user = await db.scalar(query)
 
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user or not verify_password(form_.password, user.hashed_password):
         raise HTTPException(
-            status_code=401,
-            detail="Неверный email или пароль",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email/username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="Аккаунт деактивирован")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account deactivated"
+        )
 
     access_token = create_access_token(
-        data={"sub": str(user.id), "username": user.username}
+        data={"sub": str(user.id), "username": user.username},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
@@ -119,16 +126,14 @@ async def login(
 async def read_users_me(
     current_user: Annotated[User, Depends(get_current_active_user)]
 ):
-    """Получение данных текущего пользователя"""
-    # Явно преобразуем UUID в строку
-    return {
-        "id": str(current_user.id),
-        "email": current_user.email,
-        "username": current_user.username,
-        "is_active": current_user.is_active
-    }
+    return UserResponse(
+        id=str(current_user.id),
+        email=current_user.email,
+        username=current_user.username,
+        is_active=current_user.is_active
+    )
 
 
 @router.post("/logout")
 async def logout():
-    return {"message": "Успешный выход из системы"}
+    return {"message": "Logout successful"}

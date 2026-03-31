@@ -1,34 +1,19 @@
-# 🌐 Web Framework
 fastapi==0.109.2
 uvicorn[standard]==0.27.1
 python-multipart==0.0.6
-
-# ⚙️ Config & Utils
 python-dotenv==1.0.1
 pydantic==2.6.1
 pydantic-settings==2.1.0
-email-validator==2.1.1  # ✅ Добавлено для EmailStr
-
-# 🗄️ Database
+email-validator==2.1.1
 SQLAlchemy==2.0.25
 asyncpg==0.29.0
 alembic==1.13.1
-
-# 🔐 Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.1.2
-
-# 🤖 LLM
 llama-cpp-python==0.2.50
-
-# 📄 Document Parsing
 PyPDF2==3.0.1
 python-docx==1.1.0
 lxml==5.1.0
-
-# 📊 Monitoring
 prometheus-client==0.19.0
-
-# 🔧 Development
 watchfiles==0.21.0
