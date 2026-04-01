@@ -11,6 +11,8 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.llm_service import llm_service
 from app.api import auth
+from app.api import auth, analyze  # ← добавь analyze
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,7 +62,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-
+app.include_router(analyze.router, prefix="/api", tags=["Analysis"])  # ← добавь эту строку
 
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
