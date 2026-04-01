@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Проверка — LLM Checker</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="dashboard-wrapper">
+    <aside class="sidebar">
+      <div class="logo">
+        <h2>🤖 LLM Checker</h2>
+      </div>
+      <nav class="menu">
+        <a href="/dashboard.html" class="menu-item">🏠 Главная</a>
+        <a href="/training.html" class="menu-item">📚 Дообучение</a>
+        <a href="/check.html" class="menu-item active">🔍 Проверка</a>
+        <a href="/chat.html" class="menu-item">💬 Чат</a>
+      </nav>
+    </aside>
+
+    <div class="main-wrapper">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1>🔍 Проверка документа</h1>
+        </div>
+        <div class="topbar-right">
+          <div class="user-info-display">
+            <span id="top-email" class="user-email-display">Загрузка...</span>
+          </div>
+          <button onclick="logout()" class="btn-danger">Выйти</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="placeholder">
+          <h3>🔍 Проверка качества документа</h3>
+          <p>Загрузите текст или файл для анализа</p>
+          <p class="coming-soon">Функция в разработке...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('llm_auth_token');
+    if (!token) window.location.href = '/login.html';
+    
+    fetch('/auth/me', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(user => { document.getElementById('top-email').textContent = user.email; })
+      .catch(() => {
+        localStorage.removeItem('llm_auth_token');
+        window.location.href = '/login.html';
+      });
+
+    function logout() {
+      localStorage.removeItem('llm_auth_token');
+      window.location.href = '/login.html';
+    }
+  </script>
+</body>
+</html>
