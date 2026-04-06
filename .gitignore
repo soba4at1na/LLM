@@ -20,7 +20,7 @@ frontend/dist/
 frontend/.npm
 
 # Models (большие файлы) - полностью игнорируем папку models
-backend/app/models/
+backend/models/
 
 # Docker
 docker-compose.override.yml

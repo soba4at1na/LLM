@@ -1,6 +1,6 @@
 // frontend/js/app.js — SPA с реальными API вызовами
 
-const API_BASE = 'http://localhost:8000'; // Пустая строка = относительные пути (nginx проксирует)
+const API_BASE = ''; // Пустая строка = относительные пути (nginx проксирует)
 
 // Хранилище "страниц" как HTML-шаблонов
 const pages = {
@@ -87,46 +87,35 @@ const pages = {
             <div class="placeholder"><h3>🚀 Скоро новые функции</h3><p>Система в разработке.</p></div>
           </div>
           <div id="view-training" class="view hidden"><div class="placeholder"><h3>📚 Дообучение</h3><p>Скоро...</p></div></div>
+          
+<!-- Проверка -->
 <div id="view-check" class="view hidden">
   <div class="check-container">
     <div class="check-header">
-      <h2>🔍 Проверка качества документа</h2>
-      <p class="check-description">Вставьте текст документа или загрузите файл для анализа</p>
+      <h2>🔍 Проверка документа</h2>
+      <p class="check-description">Загрузите файл для анализа</p>
     </div>
     
-    <!-- Выбор источника -->
-    <div class="source-tabs">
-      <button class="source-tab active" data-source="text" onclick="switchSource('text')">📝 Текст</button>
-      <button class="source-tab" data-source="file" onclick="switchSource('file')">📁 Файл</button>
+    <!-- Только файл -->
+    <div class="file-upload-area" onclick="document.getElementById('file-input').click()">
+      <div class="file-upload-icon">📄</div>
+      <div class="file-upload-text">Нажмите для выбора файла</div>
+      <div class="file-upload-hint">PDF, DOCX, TXT</div>
+      <input type="file" id="file-input" accept=".txt,.pdf,.docx" style="display:none" onchange="handleFileSelect(this)">
     </div>
     
-    <!-- Ввод текста -->
-    <div id="source-text" class="source-panel active">
-      <textarea id="document-text" placeholder="Вставьте текст документа сюда...&#10;&#10;Минимум 50 символов для анализа." rows="12"></textarea>
-      <div class="char-count"><span id="char-count">0</span> символов</div>
+    <div id="file-selected" class="file-selected hidden">
+      <span class="file-name" id="file-name"></span>
+      <button class="btn-small" onclick="clearFile()">✕</button>
     </div>
     
-    <!-- Загрузка файла -->
-    <div id="source-file" class="source-panel hidden">
-      <div class="file-upload-area" onclick="document.getElementById('file-input').click()">
-        <div class="file-upload-icon">📄</div>
-        <div class="file-upload-text">Нажмите для выбора файла</div>
-        <div class="file-upload-hint">PDF, DOCX, TXT (макс. 10 МБ)</div>
-        <input type="file" id="file-input" accept=".txt,.pdf,.docx" style="display:none" onchange="handleFileSelect(this)">
-      </div>
-      <div id="file-selected" class="file-selected hidden">
-        <span class="file-name" id="file-name"></span>
-        <button class="btn-small" onclick="clearFile()">✕</button>
-      </div>
-    </div>
-    
-    <!-- Кнопка анализа -->
-    <div class="check-actions">
-      <button id="analyze-btn" class="btn-primary btn-large" onclick="startAnalysis()">
-        <span class="btn-text">🚀 Начать анализ</span>
-        <span class="spinner hidden"></span>
-      </button>
-    </div>
+<!-- Кнопка анализа -->
+<div class="check-actions">
+  <button id="analyze-btn" class="btn-primary btn-large">
+    <span class="btn-text">🚀 Начать анализ</span>
+    <span class="spinner hidden"></span>
+  </button>
+</div>
     
     <!-- Результаты -->
     <div id="analysis-results" class="results-container hidden">
@@ -163,10 +152,11 @@ const pages = {
       </div>
     </div>
     
-    <!-- Ошибка -->
     <div id="analysis-error" class="alert error hidden"></div>
   </div>
-</div>          <div id="view-chat" class="view hidden"><div class="placeholder"><h3>💬 Чат</h3><p>Скоро...</p></div></div>
+</div>
+          
+          <div id="view-chat" class="view hidden"><div class="placeholder"><h3>💬 Чат</h3><p>Скоро...</p></div></div>
         </div>
       </div>
     </div>
@@ -186,25 +176,23 @@ function showPage(pageName) {
   
   app.innerHTML = pages[pageName] || pages.login;
   
-  // Привязываем обработчики после отрисовки
   if (pageName === 'login') {
     document.getElementById('login-form')?.addEventListener('submit', handleLogin);
   }
   if (pageName === 'register') {
     document.getElementById('register-form')?.addEventListener('submit', handleRegister);
   }
-  if (pageName === 'dashboard') {
-    loadUserInfo();
-  }
+ if (pageName === 'dashboard') {
+  loadUserInfo();
+  setTimeout(attachAnalyzeButton, 150);   // чуть больше задержка
+}
 }
 
 // Переключение вкладок внутри дашборда
 function navTo(viewName) {
-  // Обновляем активную вкладку в меню
   document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
   event.currentTarget.classList.add('active');
   
-  // Обновляем заголовок
   const titles = {
     dashboard: '👋 Главная',
     training: '📚 Дообучение',
@@ -213,7 +201,6 @@ function navTo(viewName) {
   };
   document.getElementById('page-title').textContent = titles[viewName] || 'LLM Checker';
   
-  // Показываем нужный view
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
   document.getElementById(`view-${viewName}`)?.classList.remove('hidden');
 }
@@ -251,7 +238,6 @@ async function handleLogin(e) {
     
     if (!res.ok) throw new Error(data.detail || 'Ошибка входа');
     
-    // ✅ Сохраняем РЕАЛЬНЫЙ токен
     localStorage.setItem('llm_auth_token', data.access_token);
     console.log('✅ Token:', data.access_token.substring(0, 40) + '...');
     
@@ -346,13 +332,11 @@ async function loadUserInfo() {
     const user = await res.json();
     console.log('✅ User loaded:', user);
     
-    // Topbar
     const topEmail = document.getElementById('top-email');
     const topId = document.getElementById('top-id');
     if (topEmail) topEmail.textContent = user.email;
     if (topId && user.id) topId.textContent = 'ID: ' + user.id.substring(0, 8) + '...';
     
-    // Card
     ['username', 'email', 'id'].forEach(field => {
       const el = document.getElementById(`user-${field}`);
       if (el && user[field]) {
@@ -405,72 +389,112 @@ function clearFile() {
   document.querySelector('.file-upload-area').classList.remove('hidden');
 }
 
-// Начало анализа
-async function startAnalysis() {
-  const textInput = document.getElementById('document-text');
-  const fileInput = document.getElementById('file-input');
-  const activeSource = document.querySelector('.source-tab.active')?.dataset.source;
-  
-  let text = '';
-  
-  if (activeSource === 'text') {
-    text = textInput?.value.trim();
-    if (text.length < 50) {
-      showError('Введите минимум 50 символов для анализа');
-      return;
-    }
-  } else {
-    const file = fileInput?.files[0];
-    if (!file) {
-      showError('Выберите файл для анализа');
-      return;
-    }
-    // Для простоты читаем только TXT файлы
-    if (file.type === 'text/plain') {
-      text = await file.text();
-    } else {
-      showError('Пока поддерживаются только TXT файлы. Вставьте текст вручную для других форматов.');
-      return;
-    }
-  }
-  
-  const btn = document.getElementById('analyze-btn');
-  const btnText = btn?.querySelector('.btn-text');
-  const spinner = btn?.querySelector('.spinner');
-  
-  // Показываем загрузку
-  if (btnText) btnText.textContent = 'Анализ...';
-  if (spinner) spinner.classList.remove('hidden');
-  if (btn) btn.disabled = true;
-  
-  hideError();
-  document.getElementById('analysis-results')?.classList.add('hidden');
-  
-  try {
-const token = localStorage.getItem('llm_auth_token');
+// Начало анализа (для текста)
+// ==================== АНАЛИЗ (с отладкой) ====================
 
-const res = await fetch('/api/analyze', {
-  method: 'POST',
-  headers: { 
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`  // ← ДОБАВИЛИ ТОКЕН!
-  },
-  body: JSON.stringify({ text })
-});
+async function startAnalysis() {
+  console.log('=== startAnalysis ВЫЗВАНА ===');
+
+  const fileInput = document.getElementById('file-input');
+  const textInput = document.getElementById('document-text');
+
+  if (fileInput && fileInput.files && fileInput.files.length > 0) {
+    const file = fileInput.files[0];
+    console.log('✅ Будем анализировать файл:', file.name);
+
+    // Показываем оверлей и НЕ прячем его до конца запроса
+    showLoading(`Анализируем файл: ${file.name}... (это может занять несколько минут)`);
+
+    try {
+      let text = '';
+
+      if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+        text = await file.text();
+        console.log('📄 Прочитано символов:', text.length);
+      } else {
+        showError('Пока поддерживаются только .txt файлы.');
+        hideLoading();
+        return;
+      }
+
+      if (text.length < 10) {   // снизили порог для тестов
+        showError(`Файл слишком короткий (${text.length} символов)`);
+        hideLoading();
+        return;
+      }
+
+      console.log('📤 Отправляем запрос на сервер...');
+      const token = localStorage.getItem('llm_auth_token');
+
+      const res = await fetch(`${API_BASE}/api/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ text })
+      });
+
+      console.log('📡 Статус ответа:', res.status);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Ошибка ${res.status}: ${errorText.substring(0, 150)}`);
+      }
+
+      const data = await res.json();
+      console.log('✅ Результат получен');
+      showResults(data);
+
+    } catch (err) {
+      console.error('❌ Ошибка анализа:', err);
+      showError(err.message || 'Не удалось получить результат');
+    } finally {
+      hideLoading();        // прячем только в конце
+    }
+    return;
+  }
+
+  // Анализ текста (оставляем как было)
+  if (textInput) {
+    const text = textInput.value.trim();
+    if (text.length < 10) {
+      showError('Введите текст (минимум 10 символов)');
+      return;
+    }
+
+    const btn = document.getElementById('analyze-btn');
+    const btnText = btn?.querySelector('.btn-text');
+    const spinner = btn?.querySelector('.spinner');
     
-    const data = await res.json();
-    
-    if (!res.ok) throw new Error(data.detail || 'Ошибка анализа');
-    
-    showResults(data);
-    
-  } catch (err) {
-    console.error('Analysis error:', err);
-    showError(err.message);
-  } finally {
-    if (btnText) btnText.textContent = '🚀 Начать анализ';
-    if (spinner) spinner.classList.add('hidden');
-    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = 'Анализ...';
+    if (spinner) spinner.classList.remove('hidden');
+    if (btn) btn.disabled = true;
+
+    hideError();
+    document.getElementById('analysis-results')?.classList.add('hidden');
+
+    try {
+      const token = localStorage.getItem('llm_auth_token');
+      const res = await fetch(`${API_BASE}/api/analyze`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ text })
+      });
+      
+      const data = await res.json();
+      showResults(data);
+    } catch (err) {
+      console.error('Analysis error:', err);
+      showError(err.message);
+    } finally {
+      if (btnText) btnText.textContent = '🚀 Начать анализ';
+      if (spinner) spinner.classList.add('hidden');
+      if (btn) btn.disabled = false;
+    }
   }
 }
 
@@ -478,7 +502,6 @@ function showResults(data) {
   const resultsEl = document.getElementById('analysis-results');
   if (!resultsEl) return;
   
-  // Общий score
   const scoreEl = document.getElementById('quality-score');
   if (scoreEl && data.overall_score) {
     const score = data.overall_score;
@@ -486,24 +509,20 @@ function showResults(data) {
     scoreEl.style.background = `conic-gradient(var(--primary) ${score * 3.6}deg, var(--border) ${score * 3.6}deg)`;
   }
   
-  // Детальные scores
   setScore('readability-score', data.readability_score);
   setScore('grammar-score', data.grammar_score);
   setScore('structure-score', data.structure_score);
   
-  // Проблемы
   const issuesList = document.getElementById('issues-list');
   if (issuesList) {
     issuesList.innerHTML = (data.issues || []).map(i => `<li>${i}</li>`).join('') || '<li>Проблем не найдено ✅</li>';
   }
   
-  // Рекомендации
   const recList = document.getElementById('recommendations-list');
   if (recList) {
     recList.innerHTML = (data.recommendations || []).map(r => `<li>${r}</li>`).join('') || '<li>Нет рекомендаций</li>';
   }
   
-  // Резюме
   const summaryEl = document.getElementById('summary-text');
   if (summaryEl) {
     summaryEl.textContent = data.summary || 'Анализ завершён';
@@ -542,3 +561,150 @@ function hideError() {
     el.textContent = '';
   }
 }
+
+// ==================== НОВОЕ: Обработка файла ====================
+// ==================== ОБРАБОТКА ФАЙЛА ====================
+// ==================== ОБРАБОТКА ФАЙЛА ====================
+// ==================== ОБРАБОТКА ФАЙЛА ====================
+
+async function handleFileSelect(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  document.getElementById('file-name').textContent = file.name;
+  document.getElementById('file-selected').classList.remove('hidden');
+  document.querySelector('.file-upload-area').classList.add('hidden');
+}
+
+function clearFile() {
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-selected').classList.add('hidden');
+  document.querySelector('.file-upload-area').classList.remove('hidden');
+}
+
+// ==================== LOADING ====================
+
+function showLoading(text = 'Загрузка...') {
+  let overlay = document.getElementById('loading-overlay');
+  if (overlay) return;
+
+  overlay = document.createElement('div');
+  overlay.id = 'loading-overlay';
+  overlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center;
+    color: white; z-index: 9999; font-size: 1.1rem;
+  `;
+  overlay.innerHTML = `
+    <div style="text-align:center;">
+      <div style="width:40px;height:40px;border:4px solid #ffffff30;border-top-color:#6366f1;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 15px;"></div>
+      <div>${text}</div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function hideLoading() {
+  const overlay = document.getElementById('loading-overlay');
+  if (overlay) overlay.remove();
+}
+
+// ==================== АНАЛИЗ ====================
+
+async function startAnalysis() {
+  console.log('=== startAnalysis ВЫЗВАНА ===');
+
+  const fileInput = document.getElementById('file-input');
+  console.log('fileInput:', fileInput ? 'найден' : 'НЕ НАЙДЕН');
+  console.log('files.length:', fileInput ? fileInput.files.length : 0);
+
+  // Если есть выбранный файл
+  if (fileInput && fileInput.files && fileInput.files.length > 0) {
+    const file = fileInput.files[0];
+    console.log('✅ Будем анализировать файл:', file.name);
+
+    showLoading(`Анализируем файл: ${file.name}...`);
+
+    try {
+      let text = '';
+
+      if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+        text = await file.text();
+        console.log('📄 Прочитано символов:', text.length);
+      } else {
+        showError('Поддерживаются только .txt файлы');
+        hideLoading();
+        return;
+      }
+
+      if (text.length < 50) {
+        showError('Файл слишком короткий');
+        hideLoading();
+        return;
+      }
+
+      console.log('📤 Отправляем запрос на сервер...');
+      const token = localStorage.getItem('llm_auth_token');
+      const res = await fetch(`${API_BASE}/api/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ text })
+      });
+
+      console.log('📡 Статус ответа:', res.status);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Ошибка ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log('✅ Результат получен');
+      showResults(data);
+
+    } catch (err) {
+      console.error('❌ Ошибка:', err);
+      showError(err.message);
+    } finally {
+      hideLoading();
+    }
+    return;
+  }
+
+  console.log('⚠️ Ни файл, ни текст не обнаружены');
+  showError('Выберите файл или введите текст');
+}
+
+// ==================== ПРИВЯЗКА КНОПКИ АНАЛИЗА ====================
+
+// ==================== ПРИВЯЗКА КНОПКИ АНАЛИЗА ====================
+
+function attachAnalyzeButton() {
+  const analyzeBtn = document.getElementById('analyze-btn');
+  if (!analyzeBtn) {
+    console.log('⚠️ Кнопка analyze-btn не найдена');
+    return;
+  }
+
+  // Удаляем все старые обработчики
+  const newBtn = analyzeBtn.cloneNode(true);
+  analyzeBtn.parentNode.replaceChild(newBtn, analyzeBtn);
+
+  // Добавляем новый обработчик
+  newBtn.addEventListener('click', () => {
+    console.log('🖱️ Клик по кнопке "Начать анализ" зафиксирован');
+    startAnalysis();
+  });
+
+  console.log('✅ Кнопка "Начать анализ" успешно перепривязана');
+}
+
+// ==================== Запуск ====================
+
+document.addEventListener('DOMContentLoaded', () => {
+  const token = localStorage.getItem('llm_auth_token');
+  showPage(token ? 'dashboard' : 'login');
+});
