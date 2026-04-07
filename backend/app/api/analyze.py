@@ -58,7 +58,7 @@ async def analyze_document(
 Будь критичен, но конструктивен. Найди реальные проблемы в тексте."""
 
     try:
-        result = llm_service.generate(prompt, max_tokens=1000, temperature=0.3)
+        result = llm_service.generate(prompt, max_tokens=700, temperature=0.3)
         
         if result.get("error"):
             raise HTTPException(status_code=500, detail=result["error"])

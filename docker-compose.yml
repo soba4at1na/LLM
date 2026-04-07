@@ -10,13 +10,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    networks:
-      - llm_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-llm_user} -d ${DB_NAME:-llm_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - llm_network
 
   backend:
     build: ./backend
@@ -28,7 +28,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-llm_user}:${DB_PASSWORD:-llm_secure_pass}@db:5432/${DB_NAME:-llm_db}
       SECRET_KEY: ${SECRET_KEY:-change_me_in_production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      MODEL_PATH: ${MODEL_PATH:-/app/models/model.gguf}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/qwen2.5-14b-instruct-uncensored-q5_k_m.gguf}
       DISABLE_LLM: ${DISABLE_LLM:-false}
       CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
     volumes:
@@ -37,7 +37,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - llm_network
 
