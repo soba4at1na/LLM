@@ -1,3 +1,5 @@
+# backend/app/main.py
+
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -5,14 +7,15 @@ from pathlib import Path
 
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine
 from app.core.llm_service import llm_service
-from app.api import auth
-from app.api import auth, analyze  # ← добавь analyze
 
+# Импорты роутеров
+from app.api import auth
+from app.api import analyze
+from app.api import chat        # ← Эта строка должна быть
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,60 +26,50 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting LLM Document Quality Checker...")
-    
+    logger.info("🚀 Запуск LLM Document Quality Checker...")
+
     async with engine.begin() as conn:
-        logger.info("Database connected")
-    
+        logger.info("✅ База данных подключена")
+
     if os.getenv("DISABLE_LLM", "false").lower() != "true":
         try:
-            logger.info(f"Loading model: {Path(settings.MODEL_PATH).name} ...")
+            logger.info(f"🚀 Загрузка модели...")
             await llm_service.initialize()
-            logger.info("Model loaded successfully!")
+            logger.info("✅ Модель успешно загружена!")
         except FileNotFoundError as e:
-            logger.warning(f"Model not found: {e}")
+            logger.warning(f"⚠️ Модель не найдена: {e}")
     else:
-        logger.warning("LLM disabled - fast development mode")
-    
-    logger.info("Application ready!")
+        logger.warning("⚠️ LLM отключён — mock режим")
+
+    logger.info("✅ Приложение готово!")
     yield
-    logger.info("Shutting down...")
+    logger.info("🛑 Приложение завершает работу...")
     await llm_service.shutdown()
 
 
 app = FastAPI(
     title="LLM Document Quality Checker",
-    description="Corporate tool for technical documentation analysis",
     version="0.1.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", ""],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-app.include_router(analyze.router, prefix="/api", tags=["Analysis"])  # ← добавь эту строку
+# Подключаем роутеры
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
+app.include_router(analyze.router, prefix="/api", tags=["Analysis"])
+app.include_router(chat.router, prefix="/api", tags=["Chat"])   # ← Должна быть эта строка
 
-@app.get("/health", status_code=status.HTTP_200_OK)
+@app.get("/health")
 async def health_check():
-    return {
-        "status": "ok",
-        "database": "connected",
-        "llm_loaded": llm_service.is_initialized
-    }
-
+    return {"status": "ok", "llm_loaded": llm_service.is_initialized}
 
 @app.get("/")
 async def root():
-    return {
-        "message": "LLM Document Quality Checker API",
-        "docs": "/docs",
-        "health": "/health"
-    }
+    return {"message": "LLM Document Quality Checker API"}

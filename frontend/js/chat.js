@@ -1,102 +1,90 @@
-// frontend/js/chat.js — Модуль чата с LLM
-
-const API_BASE = '';
+// frontend/js/chat.js — Чат с LLM
 
 // ==================== ОТПРАВКА СООБЩЕНИЯ ====================
 
 async function sendChatMessage() {
   const input = document.getElementById('chat-input');
-  const message = input.value.trim();
-  
-  if (!message) return;
+  const messageText = input ? input.value.trim() : '';
 
-  // Добавляем сообщение пользователя
-  addChatMessage('user', message);
-  
-  // Очищаем поле ввода
+  if (!messageText) return;
+
+  addChatMessage('user', messageText);
   input.value = '';
 
-  // Показываем индикатор загрузки
-  showLoading('LLM думает...');
+  showLoading('Модель думает...');
 
   try {
     const token = localStorage.getItem('llm_auth_token');
 
-    const res = await fetch(`${API_BASE}/api/chat`, {
+    const res = await fetch('/api/chat', {   // используем относительный путь
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ message })
+      body: JSON.stringify({ message: messageText })
     });
 
     if (!res.ok) {
       const errorText = await res.text();
-      throw new Error(`Ошибка ${res.status}: ${errorText.substring(0, 100)}`);
+      throw new Error(`Ошибка ${res.status}: ${errorText}`);
     }
 
     const data = await res.json();
-    
-    // Добавляем ответ модели
-    addChatMessage('assistant', data.response || data.content || "Нет ответа от модели");
+    addChatMessage('assistant', data.response || "Нет ответа от модели");
 
   } catch (err) {
     console.error('Chat error:', err);
-    addChatMessage('assistant', 'Ошибка связи с моделью. Попробуйте позже.');
+    addChatMessage('assistant', '❌ Ошибка связи с моделью. Попробуйте позже.');
   } finally {
     hideLoading();
-    // Прокручиваем чат вниз
     scrollChatToBottom();
   }
 }
 
-// ==================== ДОБАВЛЕНИЕ СООБЩЕНИЯ В ЧАТ ====================
+// ==================== ДОБАВЛЕНИЕ СООБЩЕНИЯ ====================
 
 function addChatMessage(role, text) {
-  const chatContainer = document.getElementById('chat-messages');
-  if (!chatContainer) return;
+  const container = document.getElementById('chat-messages');
+  if (!container) return;
 
   const messageDiv = document.createElement('div');
   messageDiv.className = `chat-message ${role}`;
-  
-  // Можно добавить аватарки позже
-  messageDiv.innerHTML = `
-    <div class="message-content">
-      ${text}
-    </div>
-  `;
+  messageDiv.innerHTML = `<div class="message-content">${text}</div>`;
 
-  chatContainer.appendChild(messageDiv);
+  container.appendChild(messageDiv);
   scrollChatToBottom();
 }
 
 function scrollChatToBottom() {
-  const chatContainer = document.getElementById('chat-messages');
-  if (chatContainer) {
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+  const container = document.getElementById('chat-messages');
+  if (container) {
+    container.scrollTop = container.scrollHeight;
   }
 }
 
-// ==================== ОБРАБОТКА ВВОДА ====================
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
 
-function setupChatInput() {
+function setupChat() {
   const input = document.getElementById('chat-input');
   if (!input) return;
 
-  // Отправка по Enter (без Shift)
-  input.addEventListener('keypress', (e) => {
+  // Убираем старые обработчики и добавляем новый
+  const newInput = input.cloneNode(true);
+  input.parentNode.replaceChild(newInput, input);
+
+  newInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendChatMessage();
     }
   });
 
-  console.log('✅ Чат-инпут настроен');
+  console.log('✅ Чат успешно инициализирован');
 }
 
 // Экспорт функций
 window.sendChatMessage = sendChatMessage;
-window.setupChatInput = setupChatInput;
+window.setupChat = setupChat;
 
 console.log('✅ chat.js загружен');

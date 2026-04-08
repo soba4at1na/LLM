@@ -1,9 +1,0 @@
-﻿FROM .5:7b
-
-PARAMETER temperature 0.1
-PARAMETER top_p 0.9
-PARAMETER num_ctx 4096
-
-SYSTEM "Ты технический анализатор текстов. Отвечай JSON. Формат: {\"is_correct\": true/false, \"confidence\": 0.0-1.0, \"issues\": [], \"corrected_text\": \"текст\", \"analysis\": \"комментарий\"}"
-
-TEMPLATE "Text: {{ .Prompt }}"

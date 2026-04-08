@@ -1,19 +1,24 @@
 // frontend/js/analysis.js — Анализ документов (файл + текст)
 
-//const API_BASE = '';
+// API_BASE уже объявлен в app.js — не объявляем заново
 
-// ==================== ОБРАБОТКА ФАЙЛА ====================
+// ==================== ОБРАБОТКА ВЫБОРА ФАЙЛА ====================
 
-async function handleFileSelect(input) {
+function handleFileSelect(input) {
   const file = input.files[0];
   if (!file) return;
 
-  // Показываем выбранный файл
   document.getElementById('file-name').textContent = file.name;
   document.getElementById('file-selected').classList.remove('hidden');
   document.querySelector('.file-upload-area').classList.add('hidden');
 
   console.log(`📁 Выбран файл: ${file.name}`);
+}
+
+function clearFile() {
+  document.getElementById('file-input').value = '';
+  document.getElementById('file-selected').classList.add('hidden');
+  document.querySelector('.file-upload-area').classList.remove('hidden');
 }
 
 // ==================== ЗАПУСК АНАЛИЗА ====================
@@ -24,32 +29,35 @@ async function startAnalysis() {
   const fileInput = document.getElementById('file-input');
   const textInput = document.getElementById('document-text');
 
-  // === 1. Анализ файла ===
+  // Анализ файла
   if (fileInput && fileInput.files && fileInput.files.length > 0) {
     const file = fileInput.files[0];
-    console.log('✅ Найден файл для анализа:', file.name);
+    console.log('✅ Найден файл:', file.name);
 
-    showLoading(`Анализируем файл: ${file.name}... (это может занять 1–2 минуты)`);
+    showLoading(`Анализируем файл: ${file.name}...`);
 
     try {
       let text = '';
+      const lowerName = file.name.toLowerCase();
 
-      if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+      if (lowerName.endsWith('.txt')) {
         text = await file.text();
-        console.log('📄 Прочитано символов:', text.length);
+      } else if (lowerName.endsWith('.docx') || lowerName.endsWith('.pdf')) {
+        text = `[Документ: ${file.name}]\n\n(Полный парсинг DOCX/PDF будет добавлен позже.)`;
       } else {
-        showError('Пока поддерживаются только .txt файлы. Для PDF и DOCX вставьте текст вручную.');
+        showError('Поддерживаются только .txt, .docx и .pdf файлы');
         hideLoading();
         return;
       }
 
-      if (text.length < 30) {
-        showError(`Файл слишком короткий (${text.length} символов). Минимум 30 символов.`);
+      if (text.length < 20) {
+        showError(`Файл слишком короткий (${text.length} символов)`);
         hideLoading();
         return;
       }
 
-      console.log('📤 Отправляем запрос на сервер...');
+      console.log('📄 Прочитано символов:', text.length);
+
       const token = localStorage.getItem('llm_auth_token');
 
       const res = await fetch(`${API_BASE}/api/analyze`, {
@@ -61,15 +69,12 @@ async function startAnalysis() {
         body: JSON.stringify({ text })
       });
 
-      console.log('📡 Статус ответа:', res.status);
-
       if (!res.ok) {
         const errorText = await res.text();
-        throw new Error(`Ошибка ${res.status}: ${errorText.substring(0, 150)}`);
+        throw new Error(`Ошибка ${res.status}`);
       }
 
       const data = await res.json();
-      console.log('✅ Результат получен');
       showResults(data);
 
     } catch (err) {
@@ -81,11 +86,11 @@ async function startAnalysis() {
     return;
   }
 
-  // === 2. Анализ текста (если файл не выбран) ===
+  // Анализ текста
   if (textInput) {
     const text = textInput.value.trim();
     if (text.length < 30) {
-      showError('Введите минимум 30 символов для анализа');
+      showError('Введите минимум 30 символов');
       return;
     }
 
@@ -114,8 +119,7 @@ async function startAnalysis() {
       const data = await res.json();
       showResults(data);
     } catch (err) {
-      console.error('❌ Analysis error:', err);
-      showError(err.message || 'Ошибка анализа текста');
+      showError(err.message || 'Ошибка анализа');
     } finally {
       if (btnText) btnText.textContent = '🚀 Начать анализ';
       if (spinner) spinner.classList.add('hidden');
@@ -132,7 +136,6 @@ function showResults(data) {
   const resultsEl = document.getElementById('analysis-results');
   if (!resultsEl) return;
 
-  // Общий балл
   const scoreEl = document.getElementById('quality-score');
   if (scoreEl && data.overall_score !== undefined) {
     const score = Math.round(data.overall_score);
@@ -140,41 +143,30 @@ function showResults(data) {
     scoreEl.style.background = `conic-gradient(var(--primary) ${score * 3.6}deg, var(--border) ${score * 3.6}deg)`;
   }
 
-  // Детальные оценки
   setScore('readability-score', data.readability_score);
   setScore('grammar-score', data.grammar_score);
   setScore('structure-score', data.structure_score);
 
-  // Проблемы
   const issuesList = document.getElementById('issues-list');
   if (issuesList) {
     issuesList.innerHTML = (data.issues || []).map(i => `<li>${i}</li>`).join('') || '<li>Явных проблем не найдено ✅</li>';
   }
 
-  // Рекомендации
   const recList = document.getElementById('recommendations-list');
   if (recList) {
     recList.innerHTML = (data.recommendations || []).map(r => `<li>${r}</li>`).join('') || '<li>Рекомендаций нет</li>';
   }
 
-  // Резюме
   const summaryEl = document.getElementById('summary-text');
-  if (summaryEl) {
-    summaryEl.textContent = data.summary || 'Анализ завершён успешно.';
-  }
+  if (summaryEl) summaryEl.textContent = data.summary || 'Анализ завершён';
 
   resultsEl.classList.remove('hidden');
-  console.log('📊 Результаты отображены');
 }
 
 function setScore(id, value) {
   const el = document.getElementById(id);
-  if (el && value !== undefined) {
-    el.textContent = `${Math.round(value)}/100`;
-  }
+  if (el && value !== undefined) el.textContent = `${Math.round(value)}/100`;
 }
-
-// ==================== ОЧИСТКА ====================
 
 function clearResults() {
   document.getElementById('analysis-results')?.classList.add('hidden');
@@ -185,13 +177,7 @@ function clearResults() {
   hideError();
 }
 
-function clearFile() {
-  document.getElementById('file-input').value = '';
-  document.getElementById('file-selected').classList.add('hidden');
-  document.querySelector('.file-upload-area').classList.remove('hidden');
-}
-
-// Экспорт функций
+// Экспорт
 window.handleFileSelect = handleFileSelect;
 window.startAnalysis = startAnalysis;
 window.showResults = showResults;
