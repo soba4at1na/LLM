@@ -1,16 +1,15 @@
-# backend/app/api/auth.py
-from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from passlib.exc import UnknownHashError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.database import get_db
-from app.core.config import settings
 from app.models.user import User
+from app.services.audit_service import log_event
 from app.utils.auth import (
     verify_password,
     get_password_hash,
@@ -40,6 +39,7 @@ class UserResponse(BaseModel):
     email: str
     username: str
     is_active: bool
+    is_admin: bool
 
     class Config:
         from_attributes = True
@@ -53,7 +53,8 @@ class Token(BaseModel):
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserRegister,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     try:
         if await db.scalar(select(User).where(User.email == user_data.email)):
@@ -68,9 +69,20 @@ async def register(
             hashed_password=get_password_hash(user_data.password),
             is_active=True,
             is_verified=False,
+            is_admin=False,
         )
 
         db.add(new_user)
+        await db.flush()
+        await log_event(
+            db,
+            action="user_register",
+            user_id=new_user.id,
+            resource_type="user",
+            resource_id=str(new_user.id),
+            metadata={"email": new_user.email, "username": new_user.username},
+            ip_address=request.client.host if request and request.client else None,
+        )
         await db.commit()
         await db.refresh(new_user)
 
@@ -79,7 +91,8 @@ async def register(
             "id": str(new_user.id),
             "email": new_user.email,
             "username": new_user.username,
-            "is_active": new_user.is_active
+            "is_active": new_user.is_active,
+            "is_admin": new_user.is_admin,
         }
 
     except HTTPException:
@@ -92,7 +105,8 @@ async def register(
 @router.post("/login", response_model=Token)
 async def login(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
     user = await db.scalar(
         select(User).where(
@@ -100,18 +114,41 @@ async def login(
         )
     )
 
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    is_password_ok = False
+    if user:
+        try:
+            is_password_ok = verify_password(form_data.password, user.hashed_password)
+        except UnknownHashError:
+            is_password_ok = False
+
+    if not user or not user.is_active or not is_password_ok:
+        await log_event(
+            db,
+            action="user_login_failed",
+            resource_type="user",
+            resource_id=form_data.username,
+            metadata={"username_or_email": form_data.username},
+            ip_address=request.client.host if request and request.client else None,
+        )
+        await db.commit()
         raise HTTPException(
             status_code=401,
             detail="Неверный email или пароль",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="Аккаунт деактивирован")
-
+    user.last_login_at = func.now()
     access_token = create_access_token(
         data={"sub": str(user.id), "username": user.username}
+    )
+    await log_event(
+        db,
+        action="user_login_success",
+        user_id=user.id,
+        resource_type="user",
+        resource_id=str(user.id),
+        metadata={"username": user.username},
+        ip_address=request.client.host if request and request.client else None,
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
@@ -126,7 +163,8 @@ async def read_users_me(
         "id": str(current_user.id),
         "email": current_user.email,
         "username": current_user.username,
-        "is_active": current_user.is_active
+        "is_active": current_user.is_active,
+        "is_admin": current_user.is_admin,
     }
 
 

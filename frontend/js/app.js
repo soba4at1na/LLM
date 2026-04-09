@@ -56,18 +56,28 @@ const pages = {
 
   dashboard: `
     <div class="dashboard-wrapper">
-      <aside class="sidebar">
-        <div class="logo"><h2>🤖 LLM Checker</h2></div>
+      <aside class="sidebar" id="sidebar">
+        <div class="logo"><h2>🤖 <span class="logo-text">LLM Checker</span></h2></div>
         <nav class="menu">
-          <a href="#" onclick="navTo('dashboard')" class="menu-item active">🏠 Главная</a>
-          <a href="#" onclick="navTo('training')" class="menu-item">📚 Дообучение</a>
-          <a href="#" onclick="navTo('check')" class="menu-item">🔍 Проверка</a>
-          <a href="#" onclick="navTo('chat')" class="menu-item">💬 Чат</a>
+          <a href="#" id="menu-dashboard" onclick="navTo('dashboard')" class="menu-item active"><span class="menu-icon">🏠</span><span class="menu-label">Главная</span></a>
+          <a href="#" id="menu-training" onclick="navTo('training')" class="menu-item"><span class="menu-icon">📚</span><span class="menu-label">Дообучение</span></a>
+          <a href="#" id="menu-check" onclick="navTo('check')" class="menu-item"><span class="menu-icon">🔍</span><span class="menu-label">Проверка</span></a>
+          <a href="#" id="menu-chat" onclick="navTo('chat')" class="menu-item"><span class="menu-icon">💬</span><span class="menu-label">Чат</span></a>
+          <a href="#" id="admin-menu-overview" onclick="navTo('admin-overview')" class="menu-item hidden"><span class="menu-icon">🛡️</span><span class="menu-label">Админка</span></a>
+          <a href="#" id="admin-menu-documents" onclick="navTo('admin-documents')" class="menu-item hidden"><span class="menu-icon">🗂️</span><span class="menu-label">Документы</span></a>
+          <a href="#" id="admin-menu-users" onclick="navTo('admin-users')" class="menu-item hidden"><span class="menu-icon">👥</span><span class="menu-label">Пользователи</span></a>
+          <a href="#" id="admin-menu-audit" onclick="navTo('admin-audit')" class="menu-item hidden"><span class="menu-icon">📜</span><span class="menu-label">Аудит</span></a>
         </nav>
+        <div class="sidebar-footer">
+          <button class="btn-small sidebar-toggle" onclick="toggleSidebarCollapse()">⫶</button>
+        </div>
       </aside>
       <div class="main-wrapper">
         <header class="topbar">
-          <div class="topbar-left"><h1 id="page-title">👋 Главная</h1></div>
+          <div class="topbar-left">
+            <button class="btn-small mobile-sidebar-btn" onclick="toggleMobileSidebar()">☰</button>
+            <h1 id="page-title">👋 Главная</h1>
+          </div>
           <div class="topbar-right">
             <div class="user-info-display">
               <span id="top-email" class="user-email-display">Загрузка...</span>
@@ -86,13 +96,26 @@ const pages = {
                 <div class="info-item"><label>Email</label><span id="user-email">—</span></div>
                 <div class="info-item"><label>ID</label><span id="user-id">—</span></div>
                 <div class="info-item"><label>Статус</label><span class="badge success">Активен</span></div>
+                <div class="info-item"><label>Роль</label><span id="user-role" class="badge">Пользователь</span></div>
               </div>
             </div>
           </div>
 
           <!-- Дообучение -->
           <div id="view-training" class="view hidden">
-            <div class="placeholder"><h3>📚 Дообучение</h3><p>Скоро...</p></div>
+            <div class="results-section">
+              <h4>📚 Документы для дообучения</h4>
+              <div class="file-upload-area" onclick="document.getElementById('training-file-input').click()">
+                <div class="file-upload-icon">📘</div>
+                <div class="file-upload-text">Загрузить документ в базу дообучения</div>
+                <div class="file-upload-hint">TXT, PDF, DOCX до 10MB</div>
+                <input type="file" id="training-file-input" accept=".txt,.pdf,.docx" style="display:none" onchange="uploadTrainingDocument(this)">
+              </div>
+              <div class="check-actions">
+                <button class="btn-small" onclick="loadTrainingDocuments()">Обновить список</button>
+              </div>
+              <div id="training-documents-list" class="admin-list"></div>
+            </div>
           </div>
 
           <!-- Проверка -->
@@ -154,6 +177,11 @@ const pages = {
                   <h4>📝 Краткое резюме</h4>
                   <p id="summary-text" class="summary-text"></p>
                 </div>
+
+                <div class="results-section">
+                  <h4>📄 Просмотр документа</h4>
+                  <div id="analyzed-document-viewer" class="doc-viewer"></div>
+                </div>
               </div>
               
               <div id="analysis-error" class="alert error hidden"></div>
@@ -173,6 +201,64 @@ const pages = {
                           rows="1"></textarea>
                 <button onclick="sendChatMessage()" class="chat-send-btn">➤</button>
               </div>
+            </div>
+          </div>
+
+          <div id="view-admin-overview" class="view hidden">
+            <div class="welcome-card">
+              <h2>🛡️ Админ-статистика</h2>
+              <div class="info-grid">
+                <div class="info-item"><label>Пользователей</label><span id="admin-users-count">—</span></div>
+                <div class="info-item"><label>Документов</label><span id="admin-documents-count">—</span></div>
+                <div class="info-item"><label>Проверок</label><span id="admin-analyses-count">—</span></div>
+                <div class="info-item"><label>Событий аудита</label><span id="admin-logs-count">—</span></div>
+                <div class="info-item"><label>Активных за 24ч</label><span id="admin-active-users-24h">—</span></div>
+                <div class="info-item"><label>Загрузок за 24ч</label><span id="admin-uploads-24h">—</span></div>
+                <div class="info-item"><label>Проверок за 24ч</label><span id="admin-analyses-24h">—</span></div>
+                <div class="info-item"><label>Документы check/training</label><span id="admin-doc-purpose-split">—</span></div>
+              </div>
+              <div class="check-actions">
+                <button class="btn-small" onclick="loadAdminOverview()">Обновить статистику</button>
+              </div>
+            </div>
+
+            <div class="results-section">
+              <h4>Последние проверки (все пользователи)</h4>
+              <div id="admin-history-list" class="admin-list"></div>
+            </div>
+          </div>
+
+          <div id="view-admin-audit" class="view hidden">
+            <div class="results-section">
+              <h4>📜 Аудит-логи</h4>
+              <div class="check-actions">
+                <button class="btn-small" onclick="loadAdminAuditLogs()">Обновить логи</button>
+              </div>
+              <div id="admin-audit-list" class="admin-list"></div>
+            </div>
+          </div>
+
+          <div id="view-admin-documents" class="view hidden">
+            <div class="results-section">
+              <h4>🗂️ Загруженные документы (админ)</h4>
+              <div class="check-actions">
+                <button id="admin-doc-filter-all" class="btn-small active-filter" onclick="loadAdminDocuments('all')">Все</button>
+                <button id="admin-doc-filter-check" class="btn-small" onclick="loadAdminDocuments('check')">Для проверки</button>
+                <button id="admin-doc-filter-training" class="btn-small" onclick="loadAdminDocuments('training')">Для дообучения</button>
+              </div>
+              <div id="admin-documents-list" class="admin-list"></div>
+            </div>
+          </div>
+
+          <div id="view-admin-users" class="view hidden">
+            <div class="results-section">
+              <h4>👥 Краткая сводка по пользователям</h4>
+              <div class="check-actions">
+                <button id="admin-users-sort-last-login" class="btn-small active-filter" onclick="loadAdminUsersSummary('last_login')">По последнему входу</button>
+                <button id="admin-users-sort-account-age" class="btn-small" onclick="loadAdminUsersSummary('account_age')">По возрасту аккаунта</button>
+                <button id="admin-users-only-blocked" class="btn-small" onclick="toggleBlockedUsersFilter()">Только заблокированные: нет</button>
+              </div>
+              <div id="admin-users-list" class="admin-list"></div>
             </div>
           </div>
         </div>

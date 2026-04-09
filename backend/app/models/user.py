@@ -1,12 +1,9 @@
 import uuid
-from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import Boolean, Column, String, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import declarative_base
 
-Base = declarative_base()
+from app.core.database import Base
 
 
 class User(Base):
@@ -46,10 +43,18 @@ class User(Base):
         Boolean,
         default=False
     )
+    is_admin = Column(
+        Boolean,
+        default=False
+    )
     
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now()
+    )
+    last_login_at = Column(
+        DateTime(timezone=True),
+        nullable=True
     )
     updated_at = Column(
         DateTime(timezone=True),
@@ -63,7 +68,9 @@ class User(Base):
             "username": self.username,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
+            "is_admin": self.is_admin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
         }
         if not exclude_password:
             data["hashed_password"] = self.hashed_password

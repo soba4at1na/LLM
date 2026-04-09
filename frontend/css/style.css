@@ -163,6 +163,7 @@ body {
   top: 0;
   height: 100vh;
   z-index: 100;
+  transition: width 0.2s ease, transform 0.2s ease;
 }
 
 .logo {
@@ -194,6 +195,40 @@ body {
   border-left: 3px solid transparent;
 }
 
+.menu-icon {
+  width: 24px;
+  text-align: center;
+}
+
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-toggle {
+  width: 100%;
+}
+
+.sidebar.collapsed {
+  width: 82px;
+}
+
+.sidebar.collapsed .logo-text,
+.sidebar.collapsed .menu-label,
+.sidebar.collapsed .sidebar-footer .btn-small {
+  display: none;
+}
+
+.sidebar.collapsed .logo {
+  display: flex;
+  justify-content: center;
+}
+
+.sidebar.collapsed .menu-item {
+  justify-content: center;
+  padding: 14px 0;
+}
+
 .menu-item:hover {
   background: rgba(255, 255, 255, 0.05);
   color: white;
@@ -212,6 +247,10 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+}
+
+.main-wrapper.sidebar-collapsed {
+  margin-left: 82px;
 }
 
 /* Topbar - информация об аккаунте справа */
@@ -233,6 +272,16 @@ body {
   font-size: 1.3rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-sidebar-btn {
+  display: none;
 }
 
 .topbar-right {
@@ -369,6 +418,14 @@ body {
   
   .main-wrapper {
     margin-left: 0;
+  }
+
+  .main-wrapper.sidebar-collapsed {
+    margin-left: 0;
+  }
+
+  .mobile-sidebar-btn {
+    display: inline-block;
   }
 }
 
@@ -652,6 +709,12 @@ body {
   background: var(--border);
 }
 
+.btn-small.active-filter {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--primary);
+  color: #fff;
+}
+
 .spinner {
   display: inline-block;
   width: 20px;
@@ -753,4 +816,83 @@ body {
 
 .chat-send-btn:hover {
   background: var(--primary-hover);
+}
+
+.admin-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-list-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.doc-viewer {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+}
+
+.doc-meta {
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.doc-viewer pre,
+.doc-highlighted {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92rem;
+}
+
+.issue-mark {
+  background: rgba(239, 68, 68, 0.24);
+  border-bottom: 1px dashed #ef4444;
+  cursor: help;
+  position: relative;
+}
+
+.issue-popover {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: 120%;
+  min-width: 220px;
+  max-width: 380px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 0.8rem;
+  z-index: 30;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.issue-mark:hover .issue-popover {
+  display: block;
+}
+
+.issue-popover-text {
+  margin-bottom: 6px;
+}
+
+.issue-popover-reason {
+  color: var(--text-secondary);
+  margin-bottom: 8px;
 }

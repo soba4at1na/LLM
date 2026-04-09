@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     
     DISABLE_LLM: bool = False
+    MAX_UPLOAD_SIZE_MB: int = 10
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -39,6 +40,10 @@ class Settings(BaseSettings):
             except json.JSONDecodeError:
                 return [self.CORS_ORIGINS]
         return self.CORS_ORIGINS
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 
 @lru_cache()

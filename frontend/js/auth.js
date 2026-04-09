@@ -119,6 +119,14 @@ async function loadUserInfo() {
 
     const user = await res.json();
     console.log('✅ User loaded:', user);
+    window.currentUser = user;
+    applyRoleBasedMenu(user);
+    if (user.is_admin) {
+      const adminView = document.getElementById('view-admin-overview');
+      if (adminView) {
+        navTo('admin-overview');
+      }
+    }
 
     // Обновляем данные в топбаре
     const topEmail = document.getElementById('top-email');
@@ -131,6 +139,21 @@ async function loadUserInfo() {
     document.getElementById('user-email').textContent = user.email || '—';
     document.getElementById('user-id').textContent = user.id ? user.id.substring(0, 8) + '...' : '—';
 
+    const roleEl = document.getElementById('user-role');
+    if (roleEl) {
+      roleEl.textContent = user.is_admin ? 'Администратор' : 'Пользователь';
+      roleEl.className = `badge ${user.is_admin ? 'success' : ''}`;
+    }
+
+    const adminOverview = document.getElementById('admin-menu-overview');
+    const adminDocuments = document.getElementById('admin-menu-documents');
+    const adminUsers = document.getElementById('admin-menu-users');
+    const adminAudit = document.getElementById('admin-menu-audit');
+    if (adminOverview && !user.is_admin) adminOverview.classList.add('hidden');
+    if (adminDocuments && !user.is_admin) adminDocuments.classList.add('hidden');
+    if (adminUsers && !user.is_admin) adminUsers.classList.add('hidden');
+    if (adminAudit && !user.is_admin) adminAudit.classList.add('hidden');
+
   } catch (err) {
     console.error('❌ Load user error:', err);
   }
@@ -139,7 +162,27 @@ async function loadUserInfo() {
 function doLogout() {
   console.log('🚪 Logout');
   localStorage.removeItem('llm_auth_token');
+  window.currentUser = null;
   showPage('login');
+}
+
+function applyRoleBasedMenu(user) {
+  const userMenus = ['menu-training', 'menu-check', 'menu-chat'];
+  const adminMenus = ['admin-menu-overview', 'admin-menu-documents', 'admin-menu-users', 'admin-menu-audit'];
+
+  userMenus.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (user.is_admin) el.classList.add('hidden');
+    else el.classList.remove('hidden');
+  });
+
+  adminMenus.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (user.is_admin) el.classList.remove('hidden');
+    else el.classList.add('hidden');
+  });
 }
 
 // Экспортируем функции (для использования в других модулях)
@@ -147,5 +190,6 @@ window.handleLogin = handleLogin;
 window.handleRegister = handleRegister;
 window.loadUserInfo = loadUserInfo;
 window.doLogout = doLogout;
+window.applyRoleBasedMenu = applyRoleBasedMenu;
 
 console.log('✅ auth.js загружен');

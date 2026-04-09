@@ -42,7 +42,11 @@ function navTo(viewName) {
     dashboard: '👋 Главная',
     training: '📚 Дообучение',
     check: '🔍 Проверка',
-    chat: '💬 Чат'
+    chat: '💬 Чат',
+    'admin-overview': '🛡️ Админка',
+    'admin-documents': '🗂️ Документы',
+    'admin-users': '👥 Пользователи',
+    'admin-audit': '📜 Аудит'
   };
   const titleEl = document.getElementById('page-title');
   if (titleEl) titleEl.textContent = titles[viewName] || 'LLM Checker';
@@ -50,6 +54,31 @@ function navTo(viewName) {
   document.querySelectorAll('.view').forEach(el => el.classList.add('hidden'));
   const viewEl = document.getElementById(`view-${viewName}`);
   if (viewEl) viewEl.classList.remove('hidden');
+
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && sidebar.classList.contains('open')) {
+    sidebar.classList.remove('open');
+  }
+
+  if (viewName === 'admin-overview' && typeof loadAdminOverview === 'function') {
+    loadAdminOverview();
+  }
+
+  if (viewName === 'admin-audit' && typeof loadAdminAuditLogs === 'function') {
+    loadAdminAuditLogs();
+  }
+
+  if (viewName === 'admin-documents' && typeof loadAdminDocuments === 'function') {
+    loadAdminDocuments('all');
+  }
+
+  if (viewName === 'admin-users' && typeof loadAdminUsersSummary === 'function') {
+    loadAdminUsersSummary();
+  }
+
+  if (viewName === 'training' && typeof loadTrainingDocuments === 'function') {
+    loadTrainingDocuments();
+  }
 
   console.log(`🧭 Переключение на вкладку: ${viewName}`);
 }
@@ -76,10 +105,26 @@ function initApp() {
   showPage(token ? 'dashboard' : 'login');
 }
 
+function toggleSidebarCollapse() {
+  const sidebar = document.getElementById('sidebar');
+  const main = document.querySelector('.main-wrapper');
+  if (!sidebar || !main) return;
+  sidebar.classList.toggle('collapsed');
+  main.classList.toggle('sidebar-collapsed');
+}
+
+function toggleMobileSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('open');
+}
+
 // Экспорт
 window.showPage = showPage;
 window.navTo = navTo;
 window.attachAnalyzeButton = attachAnalyzeButton;
 window.initApp = initApp;
+window.toggleSidebarCollapse = toggleSidebarCollapse;
+window.toggleMobileSidebar = toggleMobileSidebar;
 
 console.log('✅ ui.js загружен');
