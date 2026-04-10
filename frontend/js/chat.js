@@ -1,90 +1,320 @@
-// frontend/js/chat.js — Чат с LLM
+// frontend/js/chat.js — Мульти-чаты с историей в БД
 
-// ==================== ОТПРАВКА СООБЩЕНИЯ ====================
+let activeChatId = null;
+let chatsExpanded = false;
+let chatGlobalEventsBound = false;
+const CHAT_INPUT_MAX_HEIGHT = 220;
+let chatsCache = [];
+let chatInitPromise = null;
+let historyLoadToken = 0;
 
-async function sendChatMessage() {
-  const input = document.getElementById('chat-input');
-  const messageText = input ? input.value.trim() : '';
-
-  if (!messageText) return;
-
-  addChatMessage('user', messageText);
-  input.value = '';
-
-  showLoading('Модель думает...');
-
-  try {
-    const token = localStorage.getItem('llm_auth_token');
-
-    const res = await fetch('/api/chat', {   // используем относительный путь
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ message: messageText })
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Ошибка ${res.status}: ${errorText}`);
-    }
-
-    const data = await res.json();
-    addChatMessage('assistant', data.response || "Нет ответа от модели");
-
-  } catch (err) {
-    console.error('Chat error:', err);
-    addChatMessage('assistant', '❌ Ошибка связи с моделью. Попробуйте позже.');
-  } finally {
-    hideLoading();
-    scrollChatToBottom();
-  }
+function getContentScrollContainer() {
+  return document.querySelector('.content');
 }
 
-// ==================== ДОБАВЛЕНИЕ СООБЩЕНИЯ ====================
+function escapeHtml(text) {
+  return String(text ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-function addChatMessage(role, text) {
+function scrollChatToBottom(smooth = true) {
+  const scroller = getContentScrollContainer();
+  if (!scroller) return;
+  scroller.scrollTo({
+    top: scroller.scrollHeight,
+    behavior: smooth ? 'smooth' : 'auto'
+  });
+  updateScrollDownButton();
+}
+
+function updateScrollDownButton() {
+  const scroller = getContentScrollContainer();
+  const btn = document.getElementById('chat-scroll-down-btn');
+  if (!scroller || !btn) return;
+  const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+  btn.classList.toggle('hidden', distance < 120);
+}
+
+function addChatMessage(role, text, { animate = true } = {}) {
   const container = document.getElementById('chat-messages');
   if (!container) return;
 
   const messageDiv = document.createElement('div');
-  messageDiv.className = `chat-message ${role}`;
-  messageDiv.innerHTML = `<div class="message-content">${text}</div>`;
-
+  messageDiv.className = `chat-message ${role}${animate ? ' entering' : ''}`;
+  messageDiv.innerHTML = `<div class="message-content">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
   container.appendChild(messageDiv);
-  scrollChatToBottom();
 }
 
-function scrollChatToBottom() {
+async function apiWithAuth(path, options = {}) {
+  const token = localStorage.getItem('llm_auth_token');
+  const headers = { ...(options.headers || {}), Authorization: `Bearer ${token}` };
+  if (!(options.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, {
+    ...options,
+    headers
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Ошибка ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+function renderChatsList(chats) {
+  const list = document.getElementById('chat-list');
+  if (!list) return;
+  if (!Array.isArray(chats) || chats.length === 0) {
+    list.innerHTML = '<div class="chat-list-empty">Нет чатов</div>';
+    return;
+  }
+  list.innerHTML = chats.map((chat) => `
+    <div class="chat-list-item ${chat.id === activeChatId ? 'active' : ''}">
+      <button class="chat-list-open" onclick="openChat(${chat.id})" title="${escapeHtml(chat.title)}">
+        ${escapeHtml(chat.title)}
+      </button>
+      <button class="chat-dots-btn" onclick="toggleChatContextMenu(${chat.id}, event)">⋯</button>
+      <div id="chat-menu-${chat.id}" class="chat-context-menu hidden">
+        <button onclick="renameChat(${chat.id})">Переименовать</button>
+        <button class="danger" onclick="deleteChat(${chat.id})">Удалить</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateChatTopbarTitle() {
+  const titleEl = document.getElementById('page-title');
+  if (!titleEl) return;
+  const active = chatsCache.find((c) => c.id === activeChatId);
+  const chatTitle = active?.title ? active.title : 'Чат';
+  titleEl.textContent = `💬 ${chatTitle}`;
+}
+
+async function loadChats({ selectLatest = false } = {}) {
+  const chats = await apiWithAuth('/api/chats');
+  chatsCache = Array.isArray(chats) ? chats : [];
+  if (!activeChatId && chats.length) activeChatId = chats[0].id;
+  if (selectLatest && chats.length) activeChatId = chats[0].id;
+  renderChatsList(chats);
+  updateChatTopbarTitle();
+  return chats;
+}
+
+async function loadChatHistory(chatId) {
   const container = document.getElementById('chat-messages');
-  if (container) {
-    container.scrollTop = container.scrollHeight;
+  if (!container || !chatId) return;
+  const token = ++historyLoadToken;
+  container.innerHTML = '';
+  const items = await apiWithAuth(`/api/chat/history?chat_id=${chatId}&limit=300`);
+  if (token !== historyLoadToken) return;
+  if (!items.length) {
+    addChatMessage('assistant', 'Новый чат создан. Напишите сообщение.');
+    scrollChatToBottom(false);
+    return;
+  }
+  items.forEach((item) => {
+    const isAssistant = item.role !== 'user';
+    const suffix = isAssistant && item.context_used ? '\n\n(Использован контекст из ваших документов)' : '';
+    addChatMessage(isAssistant ? 'assistant' : 'user', (item.content || '') + suffix, { animate: false });
+  });
+  scrollChatToBottom(false);
+}
+
+async function openChat(chatId) {
+  activeChatId = chatId;
+  const chats = await loadChats();
+  const exists = chats.some((x) => x.id === chatId);
+  if (!exists && chats.length) activeChatId = chats[0].id;
+  await loadChatHistory(activeChatId);
+  navTo('chat');
+  updateChatTopbarTitle();
+}
+
+async function createNewChat() {
+  const created = await apiWithAuth('/api/chats', {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Новый чат' })
+  });
+  activeChatId = created.id;
+  await loadChats();
+  await loadChatHistory(activeChatId);
+  navTo('chat');
+  updateChatTopbarTitle();
+}
+
+async function renameChat(chatId) {
+  const title = prompt('Новое имя чата:');
+  if (!title || !title.trim()) return;
+  await apiWithAuth(`/api/chats/${chatId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title: title.trim().slice(0, 120) })
+  });
+  await loadChats();
+  updateChatTopbarTitle();
+}
+
+async function deleteChat(chatId) {
+  if (!confirm('Удалить этот чат?')) return;
+  await apiWithAuth(`/api/chats/${chatId}`, { method: 'DELETE' });
+  if (activeChatId === chatId) activeChatId = null;
+  const chats = await loadChats({ selectLatest: true });
+  if (chats.length) await loadChatHistory(chats[0].id);
+  else {
+    const container = document.getElementById('chat-messages');
+    if (container) container.innerHTML = '';
+  }
+  updateChatTopbarTitle();
+}
+
+function toggleChatContextMenu(chatId, event) {
+  event?.stopPropagation();
+  document.querySelectorAll('.chat-context-menu').forEach((el) => el.classList.add('hidden'));
+  const menu = document.getElementById(`chat-menu-${chatId}`);
+  if (!menu) return;
+  menu.classList.toggle('hidden');
+}
+
+function toggleChatMenu(event) {
+  event?.preventDefault();
+  const sidebar = document.getElementById('sidebar');
+  const submenu = document.getElementById('chat-submenu');
+  if (!submenu) return;
+  if (sidebar && sidebar.classList.contains('collapsed')) {
+    chatsExpanded = false;
+    submenu.classList.add('hidden');
+    navTo('chat');
+    return;
+  }
+  chatsExpanded = !chatsExpanded;
+  submenu.classList.toggle('hidden', !chatsExpanded);
+  navTo('chat');
+  updateChatTopbarTitle();
+}
+
+function setChatsExpanded(value) {
+  chatsExpanded = Boolean(value);
+}
+
+function autoResizeChatInput(inputEl) {
+  if (!inputEl) return;
+  inputEl.style.height = 'auto';
+  const nextHeight = Math.min(inputEl.scrollHeight, CHAT_INPUT_MAX_HEIGHT);
+  inputEl.style.height = `${Math.max(50, nextHeight)}px`;
+  inputEl.style.overflowY = inputEl.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  const messageText = input ? input.value.trim() : '';
+  if (!messageText) return;
+
+  if (!activeChatId) {
+    const created = await apiWithAuth('/api/chats', {
+      method: 'POST',
+      body: JSON.stringify({ title: messageText.slice(0, 60) || 'Новый чат' })
+    });
+    activeChatId = created.id;
+    await loadChats();
+    updateChatTopbarTitle();
+  }
+
+  addChatMessage('user', messageText);
+  input.value = '';
+  autoResizeChatInput(input);
+  scrollChatToBottom();
+  showLoading('Модель думает...');
+
+  try {
+    const data = await apiWithAuth('/api/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: messageText, chat_id: activeChatId })
+    });
+
+    if (data.chat_id && data.chat_id !== activeChatId) {
+      activeChatId = data.chat_id;
+    }
+    const suffix = data.context_used ? '\n\n(Использован контекст из ваших документов)' : '';
+    addChatMessage('assistant', (data.response || 'Нет ответа от модели') + suffix);
+    scrollChatToBottom();
+    await loadChats();
+    updateChatTopbarTitle();
+  } catch (err) {
+    console.error('Chat error:', err);
+    addChatMessage('assistant', 'Ошибка связи с моделью. Попробуйте позже.');
+    scrollChatToBottom();
+  } finally {
+    hideLoading();
   }
 }
 
-// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+async function initializeChats() {
+  const chats = await loadChats();
+  if (!chats.length) {
+    const created = await apiWithAuth('/api/chats', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Новый чат' })
+    });
+    activeChatId = created.id;
+    await loadChats();
+  }
+  if (!activeChatId) {
+    const refreshed = await loadChats({ selectLatest: true });
+    if (refreshed.length) activeChatId = refreshed[0].id;
+  }
+  if (activeChatId) await loadChatHistory(activeChatId);
+  updateChatTopbarTitle();
+}
+
+async function ensureChatsInitialized() {
+  if (!chatInitPromise) {
+    chatInitPromise = initializeChats().finally(() => {
+      chatInitPromise = null;
+    });
+  }
+  return chatInitPromise;
+}
 
 function setupChat() {
   const input = document.getElementById('chat-input');
   if (!input) return;
-
-  // Убираем старые обработчики и добавляем новый
   const newInput = input.cloneNode(true);
   input.parentNode.replaceChild(newInput, input);
-
   newInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendChatMessage();
     }
   });
+  newInput.addEventListener('input', () => autoResizeChatInput(newInput));
+  autoResizeChatInput(newInput);
 
-  console.log('✅ Чат успешно инициализирован');
+  const scroller = getContentScrollContainer();
+  if (scroller) {
+    scroller.removeEventListener('scroll', updateScrollDownButton);
+    scroller.addEventListener('scroll', updateScrollDownButton);
+  }
+  ensureChatsInitialized().then(() => updateScrollDownButton()).catch((e) => console.warn(e));
+
+  if (!chatGlobalEventsBound) {
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.chat-context-menu').forEach((el) => el.classList.add('hidden'));
+    });
+    chatGlobalEventsBound = true;
+  }
 }
 
-// Экспорт функций
-window.sendChatMessage = sendChatMessage;
 window.setupChat = setupChat;
-
-console.log('✅ chat.js загружен');
+window.sendChatMessage = sendChatMessage;
+window.toggleChatMenu = toggleChatMenu;
+window.setChatsExpanded = setChatsExpanded;
+window.createNewChat = createNewChat;
+window.openChat = openChat;
+window.renameChat = renameChat;
+window.deleteChat = deleteChat;
+window.toggleChatContextMenu = toggleChatContextMenu;
+window.scrollChatToBottom = scrollChatToBottom;

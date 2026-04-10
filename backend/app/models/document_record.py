@@ -15,8 +15,10 @@ class DocumentRecord(Base):
     source_type = Column(String(20), nullable=False, default="upload")  # upload | text
     purpose = Column(String(20), nullable=False, default="check")  # check | training
     file_size = Column(Integer, nullable=False, default=0)
+    file_hash = Column(String(64), nullable=True, index=True)
     file_content = Column(LargeBinary, nullable=True)
     extracted_text = Column(Text, nullable=False, default="")
+    text_hash = Column(String(64), nullable=True, index=True)
     word_count = Column(Integer, nullable=False, default=0)
     status = Column(String(32), nullable=False, default="processed")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

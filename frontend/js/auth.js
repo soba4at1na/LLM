@@ -121,11 +121,15 @@ async function loadUserInfo() {
     console.log('✅ User loaded:', user);
     window.currentUser = user;
     applyRoleBasedMenu(user);
+    const savedView = localStorage.getItem('llm_last_view');
+    const userViews = new Set(['dashboard', 'training', 'check', 'chat']);
+    const adminViews = new Set(['dashboard', 'admin-overview', 'admin-documents', 'admin-users', 'admin-audit']);
     if (user.is_admin) {
-      const adminView = document.getElementById('view-admin-overview');
-      if (adminView) {
-        navTo('admin-overview');
-      }
+      const target = adminViews.has(savedView) ? savedView : 'admin-overview';
+      navTo(target);
+    } else {
+      const target = userViews.has(savedView) ? savedView : 'dashboard';
+      navTo(target);
     }
 
     // Обновляем данные в топбаре
@@ -168,9 +172,17 @@ function doLogout() {
 
 function applyRoleBasedMenu(user) {
   const userMenus = ['menu-training', 'menu-check', 'menu-chat'];
+  const userSubmenus = ['chat-submenu'];
   const adminMenus = ['admin-menu-overview', 'admin-menu-documents', 'admin-menu-users', 'admin-menu-audit'];
 
   userMenus.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (user.is_admin) el.classList.add('hidden');
+    else el.classList.remove('hidden');
+  });
+
+  userSubmenus.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     if (user.is_admin) el.classList.add('hidden');

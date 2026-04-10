@@ -29,8 +29,10 @@ CREATE TABLE IF NOT EXISTS documents (
     source_type VARCHAR(20) NOT NULL DEFAULT 'upload',
     purpose VARCHAR(20) NOT NULL DEFAULT 'check',
     file_size INTEGER NOT NULL DEFAULT 0,
+    file_hash VARCHAR(64),
     file_content BYTEA,
     extracted_text TEXT NOT NULL DEFAULT '',
+    text_hash VARCHAR(64),
     word_count INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(32) NOT NULL DEFAULT 'processed',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -38,10 +40,14 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS purpose VARCHAR(20) DEFAULT 'check';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS text_hash VARCHAR(64);
 
 CREATE INDEX IF NOT EXISTS idx_documents_owner_id ON documents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_purpose ON documents(purpose);
+CREATE INDEX IF NOT EXISTS idx_documents_file_hash ON documents(file_hash);
+CREATE INDEX IF NOT EXISTS idx_documents_text_hash ON documents(text_hash);
 
 CREATE TABLE IF NOT EXISTS document_chunks (
     id BIGSERIAL PRIMARY KEY,
@@ -110,3 +116,30 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL DEFAULT 'Новый чат',
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGSERIAL PRIMARY KEY,
+    thread_id BIGINT REFERENCES chat_threads(id) ON DELETE SET NULL,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    context_used BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS thread_id BIGINT REFERENCES chat_threads(id) ON DELETE SET NULL;
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS context_used BOOLEAN NOT NULL DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_messages(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_chat_threads_user_id ON chat_threads(user_id);

@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     MODEL_PATH: str = "/app/models/model.gguf"
     MODEL_N_CTX: int = 8192
     MODEL_TEMPERATURE: float = 0.1
+    MODEL_MAX_TOKENS: int = 700
+    MODEL_N_THREADS: int = 14
+    MODEL_N_THREADS_BATCH: int = 14
+    MODEL_N_BATCH: int = 512
+    LLM_REQUEST_TIMEOUT_SECONDS: int = 180
     
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     

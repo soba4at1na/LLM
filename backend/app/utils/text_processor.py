@@ -1,4 +1,5 @@
 import io
+import hashlib
 import re
 from typing import Dict, List, Tuple
 
@@ -11,6 +12,15 @@ def normalize_text(text: str) -> str:
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def sha256_text(text: str) -> str:
+    normalized = normalize_text(text)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def count_words(text: str) -> int:

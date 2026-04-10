@@ -36,6 +36,21 @@ async function apiPatch(path, payload) {
   return res.json();
 }
 
+async function apiDelete(path) {
+  const token = localStorage.getItem('llm_auth_token');
+  const res = await fetch(path, {
+    method: 'DELETE',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Ошибка ${res.status}: ${body}`);
+  }
+}
+
 function escapeHtml(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;')
@@ -149,12 +164,24 @@ async function loadAdminDocuments(purpose = 'all') {
         <div>Время: ${escapeHtml(item.created_at || '')}</div>
         <div class="inline-actions">
           <button class="btn-small" onclick="previewDocumentContent(${item.id}, 'admin-document-preview')">Просмотр</button>
+          <button class="btn-small btn-danger" onclick="adminDeleteDocument(${item.id}, '${escapeHtml(item.filename || '')}')">Удалить</button>
         </div>
       </div>
     `).join('') + '<div id="admin-document-preview" class="doc-viewer"></div>';
   } catch (err) {
     const listEl = document.getElementById('admin-documents-list');
     if (listEl) listEl.innerHTML = `<p class="summary-text">Ошибка: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function adminDeleteDocument(documentId, filename = '') {
+  const namePart = filename ? ` "${filename}"` : '';
+  if (!confirm(`Удалить документ${namePart} (ID ${documentId})?`)) return;
+  try {
+    await apiDelete(`/api/documents/${documentId}`);
+    await loadAdminDocuments(adminDocFilter);
+  } catch (err) {
+    alert(err.message || 'Ошибка удаления документа');
   }
 }
 
@@ -225,3 +252,4 @@ window.loadAdminDocuments = loadAdminDocuments;
 window.toggleBlockedUsersFilter = toggleBlockedUsersFilter;
 window.loadAdminUsersSummary = loadAdminUsersSummary;
 window.setUserActive = setUserActive;
+window.adminDeleteDocument = adminDeleteDocument;

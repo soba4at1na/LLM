@@ -31,6 +31,7 @@ class RetrievalService:
         query: str,
         top_k: int = 3,
         scan_limit: int = 200,
+        min_score: float = 0.15,
     ) -> List[RetrievedChunk]:
         query_tokens = _tokenize(query)
         if not query_tokens:
@@ -62,6 +63,8 @@ class RetrievalService:
                 continue
 
             score = overlap / max(len(query_tokens), 1)
+            if score < min_score:
+                continue
             scored.append(
                 RetrievedChunk(
                     document_id=int(document_id),

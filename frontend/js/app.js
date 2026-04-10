@@ -62,7 +62,13 @@ const pages = {
           <a href="#" id="menu-dashboard" onclick="navTo('dashboard')" class="menu-item active"><span class="menu-icon">🏠</span><span class="menu-label">Главная</span></a>
           <a href="#" id="menu-training" onclick="navTo('training')" class="menu-item"><span class="menu-icon">📚</span><span class="menu-label">Дообучение</span></a>
           <a href="#" id="menu-check" onclick="navTo('check')" class="menu-item"><span class="menu-icon">🔍</span><span class="menu-label">Проверка</span></a>
-          <a href="#" id="menu-chat" onclick="navTo('chat')" class="menu-item"><span class="menu-icon">💬</span><span class="menu-label">Чат</span></a>
+          <a href="#" id="menu-chat" onclick="toggleChatMenu(event)" class="menu-item"><span class="menu-icon">💬</span><span class="menu-label">Чат</span></a>
+          <div id="chat-submenu" class="chat-submenu hidden">
+            <div id="chat-list" class="chat-list"></div>
+            <div class="chat-submenu-foot">
+              <button class="btn-small" onclick="createNewChat()">+ Новый чат</button>
+            </div>
+          </div>
           <a href="#" id="admin-menu-overview" onclick="navTo('admin-overview')" class="menu-item hidden"><span class="menu-icon">🛡️</span><span class="menu-label">Админка</span></a>
           <a href="#" id="admin-menu-documents" onclick="navTo('admin-documents')" class="menu-item hidden"><span class="menu-icon">🗂️</span><span class="menu-label">Документы</span></a>
           <a href="#" id="admin-menu-users" onclick="navTo('admin-users')" class="menu-item hidden"><span class="menu-icon">👥</span><span class="menu-label">Пользователи</span></a>
@@ -105,7 +111,7 @@ const pages = {
           <div id="view-training" class="view hidden">
             <div class="results-section">
               <h4>📚 Документы для дообучения</h4>
-              <div class="file-upload-area" onclick="document.getElementById('training-file-input').click()">
+              <div id="training-upload-area" class="file-upload-area" onclick="document.getElementById('training-file-input').click()">
                 <div class="file-upload-icon">📘</div>
                 <div class="file-upload-text">Загрузить документ в базу дообучения</div>
                 <div class="file-upload-hint">TXT, PDF, DOCX до 10MB</div>
@@ -120,16 +126,12 @@ const pages = {
 
           <!-- Проверка -->
           <div id="view-check" class="view hidden">
-            <div class="check-container">
-              <div class="check-header">
-                <h2>🔍 Проверка документа</h2>
-                <p class="check-description">Загрузите файл для анализа</p>
-              </div>
-              
-              <div class="file-upload-area" onclick="document.getElementById('file-input').click()">
+            <div class="results-section">
+              <h4>🔍 Документы для проверки</h4>
+              <div id="check-upload-area" class="file-upload-area" onclick="document.getElementById('file-input').click()">
                 <div class="file-upload-icon">📄</div>
                 <div class="file-upload-text">Нажмите для выбора файла</div>
-                <div class="file-upload-hint">PDF, DOCX, TXT</div>
+                <div class="file-upload-hint">TXT, PDF, DOCX до 10MB</div>
                 <input type="file" id="file-input" accept=".txt,.pdf,.docx" style="display:none" onchange="handleFileSelect(this)">
               </div>
               
@@ -144,8 +146,9 @@ const pages = {
                   <span class="spinner hidden"></span>
                 </button>
               </div>
+            </div>
               
-              <div id="analysis-results" class="results-container hidden">
+            <div id="analysis-results" class="results-container hidden">
                 <div class="results-header">
                   <h3>📊 Результаты анализа</h3>
                   <button class="btn-small" onclick="clearResults()">Очистить</button>
@@ -176,16 +179,16 @@ const pages = {
                 <div class="results-section">
                   <h4>📝 Краткое резюме</h4>
                   <p id="summary-text" class="summary-text"></p>
+                  <p id="analysis-meta" class="summary-text"></p>
                 </div>
 
                 <div class="results-section">
                   <h4>📄 Просмотр документа</h4>
                   <div id="analyzed-document-viewer" class="doc-viewer"></div>
                 </div>
-              </div>
-              
-              <div id="analysis-error" class="alert error hidden"></div>
             </div>
+              
+            <div id="analysis-error" class="alert error hidden"></div>
           </div>
 
           <!-- Чат -->
@@ -193,14 +196,6 @@ const pages = {
           <div id="view-chat" class="view hidden">
             <div class="chat-container">
               <div class="chat-messages" id="chat-messages"></div>
-              
-              <div class="chat-input-area">
-                <textarea id="chat-input" 
-                          class="chat-input" 
-                          placeholder="Напишите сообщение... (Enter для отправки)"
-                          rows="1"></textarea>
-                <button onclick="sendChatMessage()" class="chat-send-btn">➤</button>
-              </div>
             </div>
           </div>
 
@@ -260,6 +255,16 @@ const pages = {
               </div>
               <div id="admin-users-list" class="admin-list"></div>
             </div>
+          </div>
+        </div>
+        <div id="chat-dock" class="chat-dock hidden">
+          <button id="chat-scroll-down-btn" class="chat-scroll-down-btn hidden" onclick="scrollChatToBottom()">↓</button>
+          <div class="chat-input-area">
+            <textarea id="chat-input"
+                      class="chat-input"
+                      placeholder="Напишите сообщение... (Enter для отправки)"
+                      rows="1"></textarea>
+            <button onclick="sendChatMessage()" class="chat-send-btn">➤</button>
           </div>
         </div>
       </div>

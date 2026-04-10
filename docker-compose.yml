@@ -29,6 +29,12 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change_me_in_production}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       MODEL_PATH: ${MODEL_PATH:-/app/models/qwen2.5-14b-instruct-uncensored-q5_k_m.gguf}
+      MODEL_N_CTX: ${MODEL_N_CTX:-3072}
+      MODEL_MAX_TOKENS: ${MODEL_MAX_TOKENS:-512}
+      MODEL_N_THREADS: ${MODEL_N_THREADS:-10}
+      MODEL_N_THREADS_BATCH: ${MODEL_N_THREADS_BATCH:-10}
+      MODEL_N_BATCH: ${MODEL_N_BATCH:-256}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-240}
       DISABLE_LLM: ${DISABLE_LLM:-false}
       CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
     volumes:

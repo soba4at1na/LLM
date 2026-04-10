@@ -12,7 +12,13 @@ from app.models.document_record import DocumentChunk, DocumentRecord
 from app.models.user import User
 from app.services.audit_service import log_event
 from app.utils.auth import get_current_active_user
-from app.utils.text_processor import build_chunk_rows, count_words, extract_text_from_bytes
+from app.utils.text_processor import (
+    build_chunk_rows,
+    count_words,
+    extract_text_from_bytes,
+    sha256_bytes,
+    sha256_text,
+)
 
 router = APIRouter()
 
@@ -81,6 +87,38 @@ async def upload_document(
     if extension not in {".txt", ".pdf", ".docx"}:
         raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: .txt, .pdf, .docx")
 
+    file_hash = sha256_bytes(payload)
+    same_file = await db.scalar(
+        select(DocumentRecord).where(
+            DocumentRecord.owner_id == current_user.id,
+            DocumentRecord.purpose == purpose,
+            DocumentRecord.file_hash == file_hash,
+        ).order_by(desc(DocumentRecord.id))
+    )
+    if same_file:
+        chunk_count_existing = await db.scalar(
+            select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_file.id)
+        )
+        await log_event(
+            db,
+            action="document_upload_reused_file_hash",
+            user_id=current_user.id,
+            resource_type="document",
+            resource_id=str(same_file.id),
+            metadata={"filename": file.filename, "purpose": purpose, "file_hash": file_hash},
+            ip_address=request.client.host if request and request.client else None,
+        )
+        await db.commit()
+        return DocumentUploadResponse(
+            id=same_file.id,
+            filename=same_file.filename,
+            purpose=same_file.purpose,
+            file_size=same_file.file_size,
+            word_count=same_file.word_count,
+            chunk_count=int(chunk_count_existing or 0),
+            status=same_file.status,
+        )
+
     try:
         extracted_text, mime_type = extract_text_from_bytes(file.filename, payload)
     except ValueError as e:
@@ -91,6 +129,38 @@ async def upload_document(
     if not extracted_text:
         raise HTTPException(status_code=400, detail="Could not extract text from file")
 
+    text_hash = sha256_text(extracted_text)
+    same_text = await db.scalar(
+        select(DocumentRecord).where(
+            DocumentRecord.owner_id == current_user.id,
+            DocumentRecord.purpose == purpose,
+            DocumentRecord.text_hash == text_hash,
+        ).order_by(desc(DocumentRecord.id))
+    )
+    if same_text:
+        chunk_count_existing = await db.scalar(
+            select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_text.id)
+        )
+        await log_event(
+            db,
+            action="document_upload_reused_text_hash",
+            user_id=current_user.id,
+            resource_type="document",
+            resource_id=str(same_text.id),
+            metadata={"filename": file.filename, "purpose": purpose, "text_hash": text_hash},
+            ip_address=request.client.host if request and request.client else None,
+        )
+        await db.commit()
+        return DocumentUploadResponse(
+            id=same_text.id,
+            filename=same_text.filename,
+            purpose=same_text.purpose,
+            file_size=same_text.file_size,
+            word_count=same_text.word_count,
+            chunk_count=int(chunk_count_existing or 0),
+            status=same_text.status,
+        )
+
     document = DocumentRecord(
         owner_id=current_user.id,
         filename=file.filename,
@@ -99,8 +169,10 @@ async def upload_document(
         source_type="upload",
         purpose=purpose,
         file_size=len(payload),
+        file_hash=file_hash,
         file_content=payload,
         extracted_text=extracted_text,
+        text_hash=text_hash,
         word_count=count_words(extracted_text),
         status="processed",
     )
@@ -131,6 +203,8 @@ async def upload_document(
             "source_type": document.source_type,
             "purpose": document.purpose,
             "file_size": document.file_size,
+            "file_hash": document.file_hash,
+            "text_hash": document.text_hash,
             "chunk_count": len(chunk_rows),
         },
         ip_address=request.client.host if request and request.client else None,

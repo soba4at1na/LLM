@@ -15,13 +15,13 @@ from app.models.document_record import DocumentChunk, DocumentRecord
 from app.models.user import User
 from app.services.audit_service import log_event
 from app.utils.auth import get_current_active_user
-from app.utils.text_processor import build_chunk_rows, count_words
+from app.utils.text_processor import build_chunk_rows, count_words, sha256_text
 
 router = APIRouter()
 
 
 class AnalyzeRequest(BaseModel):
-    text: Optional[str] = Field(default=None, description="Текст документа для анализа")
+    text: Optional[str] = Field(default=None, max_length=200000, description="Текст документа для анализа")
     document_id: Optional[int] = Field(default=None, description="ID ранее загруженного документа")
     filename: Optional[str] = Field(default="inline_text.txt", max_length=255)
 
@@ -45,6 +45,11 @@ class AnalyzeResponse(BaseModel):
     summary: str
     document_id: int
     analysis_id: int
+    model_mode: str = "mock"
+    processing_ms: Optional[int] = None
+    analyzed_at: Optional[str] = None
+    cached: bool = False
+    cached_from_analysis_id: Optional[int] = None
 
 
 class AnalysisHistoryItem(BaseModel):
@@ -62,6 +67,7 @@ class AnalysisHistoryItem(BaseModel):
     summary: str
     issues: List[str]
     recommendations: List[str]
+    issue_details: List[dict] = Field(default_factory=list)
     run_mode: str = Field(alias="model_mode")
     processing_ms: Optional[int] = None
     created_at: str
@@ -80,9 +86,30 @@ async def analyze_document(
     text = document.extracted_text
     if len(text) < 50:
         raise HTTPException(status_code=400, detail="Текст слишком короткий для анализа")
+    if not document.text_hash and text:
+        document.text_hash = sha256_text(text)
+        await db.flush()
+
+    cached_payload = await _try_get_cached_analysis_payload(document, current_user, db)
+    if cached_payload is not None:
+        await log_event(
+            db,
+            action="analysis_cache_hit",
+            user_id=current_user.id,
+            resource_type="analysis_run",
+            resource_id=str(cached_payload["analysis_id"]),
+            metadata={
+                "document_id": document.id,
+                "text_hash": document.text_hash,
+                "source_analysis_id": cached_payload["analysis_id"],
+            },
+            ip_address=http_request.client.host if http_request and http_request.client else None,
+        )
+        await db.commit()
+        return AnalyzeResponse(**cached_payload)
 
     if llm_service.is_initialized:
-        result = _analyze_with_llm(text)
+        result = await _analyze_with_llm(text)
         model_mode = "llm"
     else:
         result = get_mock_analysis(text)
@@ -132,6 +159,11 @@ async def analyze_document(
     payload = result.model_dump()
     payload["document_id"] = document.id
     payload["analysis_id"] = run.id
+    payload["model_mode"] = model_mode
+    payload["processing_ms"] = processing_ms
+    payload["analyzed_at"] = run.created_at.isoformat() if run.created_at else None
+    payload["cached"] = False
+    payload["cached_from_analysis_id"] = None
     return AnalyzeResponse(**payload)
 
 
@@ -201,12 +233,72 @@ async def get_analysis_history(
             summary=run.summary,
             issues=issues_map.get(int(run.id), []),
             recommendations=rec_map.get(int(run.id), []),
+            issue_details=_extract_issue_details(run.raw_response),
             run_mode=run.model_mode,
             processing_ms=run.processing_ms,
             created_at=run.created_at.isoformat(),
         )
         for run, filename, user_email in rows
     ]
+
+
+async def _try_get_cached_analysis_payload(
+    document: DocumentRecord,
+    user: User,
+    db: AsyncSession,
+) -> Optional[dict]:
+    if not document.text_hash:
+        return None
+
+    cached_row = (
+        await db.execute(
+            select(AnalysisRun)
+            .join(DocumentRecord, DocumentRecord.id == AnalysisRun.document_id)
+            .where(
+                AnalysisRun.user_id == user.id,
+                DocumentRecord.owner_id == user.id,
+                DocumentRecord.text_hash == document.text_hash,
+            )
+            .order_by(desc(AnalysisRun.id))
+            .limit(1)
+        )
+    ).first()
+    if not cached_row:
+        return None
+
+    (run,) = cached_row
+    issues = (
+        await db.execute(
+            select(AnalysisIssueRecord.text)
+            .where(AnalysisIssueRecord.run_id == run.id)
+            .order_by(AnalysisIssueRecord.issue_index)
+        )
+    ).scalars().all()
+    recommendations = (
+        await db.execute(
+            select(AnalysisRecommendationRecord.text)
+            .where(AnalysisRecommendationRecord.run_id == run.id)
+            .order_by(AnalysisRecommendationRecord.recommendation_index)
+        )
+    ).scalars().all()
+
+    return {
+        "overall_score": run.overall_score,
+        "readability_score": run.readability_score,
+        "grammar_score": run.grammar_score,
+        "structure_score": run.structure_score,
+        "issues": [str(x) for x in issues],
+        "recommendations": [str(x) for x in recommendations],
+        "issue_details": _extract_issue_details(run.raw_response),
+        "summary": run.summary,
+        "document_id": document.id,
+        "analysis_id": run.id,
+        "model_mode": run.model_mode,
+        "processing_ms": 0,
+        "analyzed_at": run.created_at.isoformat() if run.created_at else None,
+        "cached": True,
+        "cached_from_analysis_id": run.id,
+    }
 
 
 async def _resolve_or_create_document(request: AnalyzeRequest, user: User, db: AsyncSession) -> DocumentRecord:
@@ -223,6 +315,17 @@ async def _resolve_or_create_document(request: AnalyzeRequest, user: User, db: A
 
     text = (request.text or "").strip()
     filename = (request.filename or "inline_text.txt").strip() or "inline_text.txt"
+    text_hash = sha256_text(text)
+    existing_by_hash = await db.scalar(
+        select(DocumentRecord).where(
+            DocumentRecord.owner_id == user.id,
+            DocumentRecord.purpose == "check",
+            DocumentRecord.source_type == "text",
+            DocumentRecord.text_hash == text_hash,
+        ).order_by(desc(DocumentRecord.id))
+    )
+    if existing_by_hash:
+        return existing_by_hash
 
     document = DocumentRecord(
         owner_id=user.id,
@@ -232,8 +335,10 @@ async def _resolve_or_create_document(request: AnalyzeRequest, user: User, db: A
         source_type="text",
         purpose="check",
         file_size=len(text.encode("utf-8")),
+        file_hash=None,
         file_content=text.encode("utf-8"),
         extracted_text=text,
+        text_hash=text_hash,
         word_count=count_words(text),
         status="processed",
     )
@@ -254,7 +359,7 @@ async def _resolve_or_create_document(request: AnalyzeRequest, user: User, db: A
     return document
 
 
-def _analyze_with_llm(text: str) -> AnalyzeResponse:
+async def _analyze_with_llm(text: str) -> AnalyzeResponse:
     prompt = f"""Проанализируй следующий документ и оцени его качество по шкале от 0 до 100.
 
 Текст документа:
@@ -268,12 +373,16 @@ def _analyze_with_llm(text: str) -> AnalyzeResponse:
     "readability_score": 80,
     "grammar_score": 90,
     "structure_score": 85,
-    "issues": ["Проблема 1", "Проблема 2"],
-    "recommendations": ["Рекомендация 1", "Рекомендация 2"],
+    "issues": ["Конкретная проблема в тексте с пояснением", "Еще одна конкретная проблема"],
+    "recommendations": ["Конкретная правка, что именно поменять", "Вторая конкретная правка"],
+    "issue_details": [
+      {{"fragment":"точный фрагмент из текста","suggestion":"как переписать","reason":"почему это лучше","confidence":"high"}},
+      {{"fragment":"еще один точный фрагмент","suggestion":"вариант правки","reason":"обоснование","confidence":"medium"}}
+    ],
     "summary": "Краткое резюме анализа"
 }}
 """
-    result = llm_service.generate(prompt, max_tokens=700, temperature=0.3)
+    result = await llm_service.generate_async(prompt, max_tokens=700, temperature=0.3)
     if result.get("error"):
         return get_mock_analysis(text)
 
@@ -285,6 +394,12 @@ def _analyze_with_llm(text: str) -> AnalyzeResponse:
 
     try:
         parsed = json.loads(content[json_start:json_end + 1])
+        issue_details = _prepare_issue_details(
+            text=text,
+            issues=[str(i) for i in parsed.get("issues", [])],
+            recommendations=[str(r) for r in parsed.get("recommendations", [])],
+            raw_details=parsed.get("issue_details", []),
+        )
         return AnalyzeResponse(
             overall_score=int(parsed.get("overall_score", 0)),
             readability_score=int(parsed.get("readability_score", 0)),
@@ -292,15 +407,7 @@ def _analyze_with_llm(text: str) -> AnalyzeResponse:
             structure_score=int(parsed.get("structure_score", 0)),
             issues=[str(i) for i in parsed.get("issues", [])],
             recommendations=[str(r) for r in parsed.get("recommendations", [])],
-            issue_details=[
-                {
-                    "fragment": str(x.get("fragment", "")),
-                    "suggestion": str(x.get("suggestion", "")),
-                    "reason": str(x.get("reason", "")),
-                }
-                for x in parsed.get("issue_details", [])
-                if isinstance(x, dict)
-            ],
+            issue_details=issue_details,
             summary=str(parsed.get("summary", "")),
             document_id=0,
             analysis_id=0,
@@ -333,6 +440,7 @@ def get_mock_analysis(text: str) -> AnalyzeResponse:
                     "fragment": longest_sentence[:180],
                     "suggestion": "Разделите это предложение на 2-3 более коротких.",
                     "reason": "Слишком длинное предложение ухудшает читаемость.",
+                    "confidence": "medium",
                 }
             )
 
@@ -344,6 +452,7 @@ def get_mock_analysis(text: str) -> AnalyzeResponse:
                 "fragment": "  ",
                 "suggestion": "Замените двойные пробелы на один.",
                 "reason": "Лишние пробелы считаются ошибкой форматирования.",
+                "confidence": "high",
             }
         )
 
@@ -355,6 +464,7 @@ def get_mock_analysis(text: str) -> AnalyzeResponse:
                 "fragment": text[:120],
                 "suggestion": "Добавьте больше фактов, примеров и пояснений.",
                 "reason": "Короткий текст не позволяет выполнить полноценную проверку качества.",
+                "confidence": "medium",
             }
         )
 
@@ -375,3 +485,97 @@ def get_mock_analysis(text: str) -> AnalyzeResponse:
         document_id=0,
         analysis_id=0,
     )
+
+
+def _extract_issue_details(raw_response: dict | None) -> List[dict]:
+    if not isinstance(raw_response, dict):
+        return []
+    raw_details = raw_response.get("issue_details", [])
+    if not isinstance(raw_details, list):
+        return []
+    out: List[dict] = []
+    for item in raw_details:
+        if not isinstance(item, dict):
+            continue
+        fragment = str(item.get("fragment", "")).strip()
+        suggestion = str(item.get("suggestion", "")).strip()
+        reason = str(item.get("reason", "")).strip()
+        confidence_raw = str(item.get("confidence", "medium")).strip().lower()
+        confidence = confidence_raw if confidence_raw in {"low", "medium", "high"} else "medium"
+        if fragment and suggestion:
+            out.append(
+                {
+                    "fragment": fragment,
+                    "suggestion": suggestion,
+                    "reason": reason,
+                    "confidence": confidence,
+                }
+            )
+    return out
+
+
+def _prepare_issue_details(
+    text: str,
+    issues: List[str],
+    recommendations: List[str],
+    raw_details: list | None,
+) -> List[dict]:
+    details: List[dict] = []
+    if isinstance(raw_details, list):
+        for item in raw_details:
+            if not isinstance(item, dict):
+                continue
+            fragment = str(item.get("fragment", "")).strip()
+            suggestion = str(item.get("suggestion", "")).strip()
+            reason = str(item.get("reason", "")).strip()
+            confidence_raw = str(item.get("confidence", "medium")).strip().lower()
+            confidence = confidence_raw if confidence_raw in {"low", "medium", "high"} else "medium"
+            if fragment and suggestion:
+                details.append(
+                    {
+                        "fragment": fragment,
+                        "suggestion": suggestion,
+                        "reason": reason,
+                        "confidence": confidence,
+                    }
+                )
+
+    if details:
+        return details
+
+    sentence_candidates = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if len(s.strip()) > 20]
+    for idx, issue_text in enumerate(issues):
+        issue_l = issue_text.lower()
+        recommendation = recommendations[idx] if idx < len(recommendations) else "Переформулируйте фрагмент понятнее."
+        fragment = ""
+        reason = issue_text
+
+        if "двойн" in issue_l and "  " in text:
+            fragment = "  "
+        elif "длин" in issue_l and sentence_candidates:
+            fragment = max(sentence_candidates, key=len)[:220]
+        elif sentence_candidates:
+            fragment = sentence_candidates[min(idx, len(sentence_candidates) - 1)][:220]
+
+        if fragment:
+            details.append(
+                {
+                    "fragment": fragment,
+                    "suggestion": recommendation,
+                    "reason": reason,
+                    "confidence": "low",
+                }
+            )
+
+    if not details and text.strip():
+        fallback_fragment = text.strip()[:220]
+        details.append(
+            {
+                "fragment": fallback_fragment,
+                "suggestion": recommendations[0] if recommendations else "Уточните формулировки и добавьте конкретику.",
+                "reason": issues[0] if issues else "Найдены потенциальные улучшения.",
+                "confidence": "low",
+            }
+        )
+
+    return details[:10]

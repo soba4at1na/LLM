@@ -5,20 +5,21 @@ let analyzedOriginalText = '';
 let analyzedCurrentText = '';
 let analyzedIssueDetails = [];
 let issueAppliedState = [];
+let currentAnalysisId = null;
 
 function handleFileSelect(input) {
   const file = input.files[0];
   if (!file) return;
   document.getElementById('file-name').textContent = file.name;
   document.getElementById('file-selected').classList.remove('hidden');
-  document.querySelector('.file-upload-area').classList.add('hidden');
+  document.getElementById('check-upload-area')?.classList.add('hidden');
 }
 
 function clearFile() {
   const input = document.getElementById('file-input');
   if (input) input.value = '';
   document.getElementById('file-selected')?.classList.add('hidden');
-  document.querySelector('.file-upload-area')?.classList.remove('hidden');
+  document.getElementById('check-upload-area')?.classList.remove('hidden');
   currentCheckDocumentId = null;
 }
 
@@ -105,9 +106,24 @@ async function showResults(data) {
   }
   const summaryEl = document.getElementById('summary-text');
   if (summaryEl) summaryEl.textContent = data.summary || 'Анализ завершён';
+  const metaEl = document.getElementById('analysis-meta');
+  if (metaEl) {
+    const parts = [];
+    if (data.processing_ms !== undefined && data.processing_ms !== null) {
+      parts.push(`Время анализа: ${(Number(data.processing_ms) / 1000).toFixed(2)} сек`);
+    }
+    if (data.model_mode) {
+      parts.push(`Режим: ${escapeHtml(String(data.model_mode))}`);
+    }
+    if (data.analyzed_at) {
+      parts.push(`Выполнено: ${escapeHtml(data.analyzed_at)}`);
+    }
+    metaEl.textContent = parts.join(' | ');
+  }
 
   resultsEl.classList.remove('hidden');
 
+  currentAnalysisId = data.analysis_id || null;
   analyzedIssueDetails = Array.isArray(data.issue_details) ? data.issue_details : [];
   issueAppliedState = analyzedIssueDetails.map(() => false);
   if (data.document_id) {
@@ -132,7 +148,7 @@ function renderAnalyzedDocument() {
   if (!viewer) return;
   const html = buildHighlightedHtml(analyzedCurrentText, analyzedIssueDetails, issueAppliedState);
   viewer.innerHTML = `
-    <div class="doc-meta"><strong>Документ</strong> | слов: ${countWords(analyzedCurrentText)}</div>
+    <div class="doc-meta"><strong>Документ</strong> | слов: ${countWords(analyzedCurrentText)}${currentAnalysisId ? ` | анализ #${currentAnalysisId}` : ''}</div>
     <div class="doc-rendered">${html}</div>
   `;
 }
@@ -140,29 +156,48 @@ function renderAnalyzedDocument() {
 function buildHighlightedHtml(text, details, appliedState) {
   if (!text) return '<em>Пустой текст</em>';
   let html = escapeHtml(text);
+  let anyHighlightApplied = false;
   details.forEach((detail, i) => {
     const fragment = String(detail.fragment || '').trim();
     if (!fragment) return;
-    const safe = escapeHtml(fragment);
+    const suggestionRaw = String(detail.suggestion || '');
+    const markerText = appliedState[i] ? suggestionRaw : fragment;
+    if (!markerText.trim()) return;
+    const safeMarker = escapeHtml(markerText);
     const suggestion = escapeHtml(detail.suggestion || 'Нет рекомендации');
     const reason = escapeHtml(detail.reason || '');
+    const confidence = String(detail.confidence || 'medium').toLowerCase();
+    const confidenceBadge = confidence === 'low'
+      ? '<div class="issue-popover-confidence low">Низкая уверенность</div>'
+      : '';
     const btnText = appliedState[i] ? 'Откатить' : 'Применить';
     const replacement = `
-      <span class="issue-mark">
-        ${safe}
+      <span class="issue-mark" id="issue-mark-${i}" onclick="toggleIssuePopover(${i}, event)">
+        ${safeMarker}
         <span class="issue-popover">
+          ${confidenceBadge}
           <div class="issue-popover-text">${suggestion}</div>
           ${reason ? `<div class="issue-popover-reason">${reason}</div>` : ''}
-          <button class="btn-small" onclick="toggleIssueFix(${i})">${btnText}</button>
+          <button class="btn-small" onclick="toggleIssueFix(${i}, event)">${btnText}</button>
         </span>
       </span>
     `;
-    html = html.replace(safe, replacement);
+    const nextHtml = html.replace(safeMarker, replacement);
+    if (nextHtml !== html) {
+      anyHighlightApplied = true;
+      html = nextHtml;
+    }
   });
+  if (!anyHighlightApplied) {
+    return `<div class="doc-highlighted">${html}</div><p class="summary-text">Точные фрагменты не найдены, показываю исходный текст без подсветки.</p>`;
+  }
   return `<div class="doc-highlighted">${html}</div>`;
 }
 
-function toggleIssueFix(index) {
+function toggleIssueFix(index, event) {
+  if (event && typeof event.stopPropagation === 'function') {
+    event.stopPropagation();
+  }
   const detail = analyzedIssueDetails[index];
   if (!detail) return;
   const fragment = String(detail.fragment || '');
@@ -170,13 +205,42 @@ function toggleIssueFix(index) {
   if (!fragment || !suggestion) return;
 
   if (!issueAppliedState[index]) {
-    analyzedCurrentText = analyzedCurrentText.replace(fragment, suggestion);
+    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, suggestion);
+    if (!result.replaced) return;
+    analyzedCurrentText = result.text;
     issueAppliedState[index] = true;
   } else {
-    analyzedCurrentText = analyzedCurrentText.replace(suggestion, fragment);
+    const result = replaceFirstOccurrence(analyzedCurrentText, suggestion, fragment);
+    if (!result.replaced) return;
+    analyzedCurrentText = result.text;
     issueAppliedState[index] = false;
   }
   renderAnalyzedDocument();
+  const el = document.getElementById(`issue-mark-${index}`);
+  if (el) el.classList.add('open');
+}
+
+function replaceFirstOccurrence(source, search, replacement) {
+  const start = String(source).indexOf(String(search));
+  if (start < 0) return { text: source, replaced: false };
+  const before = source.slice(0, start);
+  const after = source.slice(start + String(search).length);
+  return { text: `${before}${replacement}${after}`, replaced: true };
+}
+
+function closeIssuePopovers() {
+  document.querySelectorAll('.issue-mark.open').forEach(el => el.classList.remove('open'));
+}
+
+function toggleIssuePopover(index, event) {
+  if (event && typeof event.stopPropagation === 'function') {
+    event.stopPropagation();
+  }
+  const el = document.getElementById(`issue-mark-${index}`);
+  if (!el) return;
+  const willOpen = !el.classList.contains('open');
+  closeIssuePopovers();
+  if (willOpen) el.classList.add('open');
 }
 
 function setScore(id, value) {
@@ -190,13 +254,50 @@ function countWords(text) {
 
 function clearResults() {
   document.getElementById('analysis-results')?.classList.add('hidden');
-  document.getElementById('analyzed-document-viewer').innerHTML = '';
+  const viewer = document.getElementById('analyzed-document-viewer');
+  if (viewer) viewer.innerHTML = '';
+  const meta = document.getElementById('analysis-meta');
+  if (meta) meta.textContent = '';
   analyzedOriginalText = '';
   analyzedCurrentText = '';
   analyzedIssueDetails = [];
   issueAppliedState = [];
+  currentAnalysisId = null;
   clearFile();
   hideError();
+}
+
+async function loadLatestAnalysisForUser() {
+  const token = localStorage.getItem('llm_auth_token');
+  if (!token) return;
+
+  try {
+    const res = await fetch('/api/analysis/history?limit=1', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const history = await res.json();
+    if (!Array.isArray(history) || history.length === 0) return;
+
+    const latest = history[0];
+    await showResults({
+      analysis_id: latest.analysis_id,
+      document_id: latest.document_id,
+      overall_score: latest.overall_score,
+      readability_score: latest.readability_score,
+      grammar_score: latest.grammar_score,
+      structure_score: latest.structure_score,
+      issues: latest.issues || [],
+      recommendations: latest.recommendations || [],
+      issue_details: latest.issue_details || [],
+      summary: latest.summary || 'Анализ завершён',
+      model_mode: latest.run_mode || latest.model_mode || 'unknown',
+      processing_ms: latest.processing_ms,
+      analyzed_at: latest.created_at
+    });
+  } catch (err) {
+    console.warn('Не удалось загрузить последнюю проверку:', err);
+  }
 }
 
 function escapeHtml(text) {
@@ -214,3 +315,10 @@ window.showResults = showResults;
 window.clearResults = clearResults;
 window.clearFile = clearFile;
 window.toggleIssueFix = toggleIssueFix;
+window.toggleIssuePopover = toggleIssuePopover;
+window.loadLatestAnalysisForUser = loadLatestAnalysisForUser;
+
+if (!window.__issuePopoverGlobalClickBound) {
+  document.addEventListener('click', () => closeIssuePopovers());
+  window.__issuePopoverGlobalClickBound = true;
+}
