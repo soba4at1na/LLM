@@ -72,6 +72,7 @@ const pages = {
           <a href="#" id="admin-menu-overview" onclick="navTo('admin-overview')" class="menu-item hidden"><span class="menu-icon">🛡️</span><span class="menu-label">Админка</span></a>
           <a href="#" id="admin-menu-documents" onclick="navTo('admin-documents')" class="menu-item hidden"><span class="menu-icon">🗂️</span><span class="menu-label">Документы</span></a>
           <a href="#" id="admin-menu-users" onclick="navTo('admin-users')" class="menu-item hidden"><span class="menu-icon">👥</span><span class="menu-label">Пользователи</span></a>
+          <a href="#" id="admin-menu-knowledge" onclick="navTo('admin-knowledge')" class="menu-item hidden"><span class="menu-icon">🧠</span><span class="menu-label">База знаний</span></a>
           <a href="#" id="admin-menu-audit" onclick="navTo('admin-audit')" class="menu-item hidden"><span class="menu-icon">📜</span><span class="menu-label">Аудит</span></a>
         </nav>
         <div class="sidebar-footer">
@@ -111,6 +112,12 @@ const pages = {
           <div id="view-training" class="view hidden">
             <div class="results-section">
               <h4>📚 Документы для дообучения</h4>
+              <div class="form-stack" style="margin-bottom:12px;">
+                <select id="training-confidentiality">
+                  <option value="confidential" selected>Конфиденциальность: commercial/confidential</option>
+                  <option value="public">Конфиденциальность: public</option>
+                </select>
+              </div>
               <div id="training-upload-area" class="file-upload-area" onclick="document.getElementById('training-file-input').click()">
                 <div class="file-upload-icon">📘</div>
                 <div class="file-upload-text">Загрузить документ в базу дообучения</div>
@@ -128,6 +135,12 @@ const pages = {
           <div id="view-check" class="view hidden">
             <div class="results-section">
               <h4>🔍 Документы для проверки</h4>
+              <div class="form-stack" style="margin-bottom:12px;">
+                <select id="check-confidentiality">
+                  <option value="confidential" selected>Конфиденциальность: commercial/confidential</option>
+                  <option value="public">Конфиденциальность: public</option>
+                </select>
+              </div>
               <div id="check-upload-area" class="file-upload-area" onclick="document.getElementById('file-input').click()">
                 <div class="file-upload-icon">📄</div>
                 <div class="file-upload-text">Нажмите для выбора файла</div>
@@ -151,7 +164,11 @@ const pages = {
             <div id="analysis-results" class="results-container hidden">
                 <div class="results-header">
                   <h3>📊 Результаты анализа</h3>
-                  <button class="btn-small" onclick="clearResults()">Очистить</button>
+                  <div class="results-header-actions">
+                    <button class="btn-small" onclick="exportCurrentAnalysis('json')">Экспорт JSON</button>
+                    <button class="btn-small" onclick="exportCurrentAnalysis('pdf')">Экспорт PDF</button>
+                    <button class="btn-small" onclick="clearResults()">Очистить</button>
+                  </div>
                 </div>
                 
                 <div class="score-card">
@@ -256,6 +273,100 @@ const pages = {
               <div id="admin-users-list" class="admin-list"></div>
             </div>
           </div>
+
+          <div id="view-admin-knowledge" class="view hidden">
+            <div class="results-section">
+              <h4>🧠 База знаний</h4>
+              <div class="check-actions">
+                <button class="btn-small" onclick="loadAdminKnowledge()">Обновить</button>
+                <button class="btn-small" onclick="seedAdminKnowledgeDefaults()">Заполнить базовыми правилами</button>
+                <button id="knowledge-filter-active-btn" class="btn-small" onclick="toggleKnowledgeActiveFilter()">Только активные: нет</button>
+              </div>
+              <div class="info-grid">
+                <div class="info-item"><label>Источники</label><span id="knowledge-sources-count">—</span></div>
+                <div class="info-item"><label>Термины</label><span id="knowledge-glossary-count">—</span></div>
+                <div class="info-item"><label>Правила</label><span id="knowledge-rules-count">—</span></div>
+                <div class="info-item"><label>Активные правила</label><span id="knowledge-active-rules-count">—</span></div>
+              </div>
+              <div class="results-section">
+                <h4>Проверка правил на тексте</h4>
+                <div class="form-stack">
+                  <textarea id="knowledge-test-text" rows="4" placeholder="Введите тестовый текст, например: ip это интернет. ИБ!!"></textarea>
+                  <button class="btn-small" onclick="runKnowledgeSmokeTest()">Проверить срабатывания</button>
+                </div>
+                <div id="knowledge-test-result" class="summary-text">—</div>
+              </div>
+            </div>
+
+            <div class="admin-grid">
+              <div class="results-section">
+                <h4>Источники</h4>
+                <form id="knowledge-source-form" class="form-stack">
+                  <input id="knowledge-source-title" type="text" placeholder="Название источника" required>
+                  <input id="knowledge-source-code" type="text" placeholder="Код (например CORP-IT-SEC-001)" pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,63}" title="2-64 символа: латиница, цифры, . _ -">
+                  <input id="knowledge-source-section" type="text" placeholder="Раздел (необязательно)">
+                  <button class="btn-small" type="submit">Добавить источник</button>
+                  <div id="knowledge-source-error" class="form-error hidden"></div>
+                </form>
+                <div id="knowledge-sources-list" class="admin-list knowledge-list-scroll"></div>
+              </div>
+
+              <div class="results-section">
+                <h4>Термины глоссария</h4>
+                <form id="knowledge-glossary-form" class="form-stack">
+                  <input id="knowledge-term" type="text" placeholder="Термин" required>
+                  <textarea id="knowledge-term-definition" rows="2" placeholder="Каноничное определение" required></textarea>
+                  <input id="knowledge-term-forbidden" type="text" placeholder="Запрещенные варианты через ;">
+                  <select id="knowledge-term-source-id">
+                    <option value="">Источник: не выбран</option>
+                  </select>
+                  <select id="knowledge-term-severity">
+                    <option value="low">low</option>
+                    <option value="medium" selected>medium</option>
+                    <option value="high">high</option>
+                    <option value="critical">critical</option>
+                  </select>
+                  <button class="btn-small" type="submit">Добавить термин</button>
+                  <div id="knowledge-term-error" class="form-error hidden"></div>
+                </form>
+                <div id="knowledge-glossary-list" class="admin-list knowledge-list-scroll"></div>
+              </div>
+
+              <div class="results-section">
+                <h4>Правила</h4>
+                <form id="knowledge-rule-form" class="form-stack">
+                  <input id="knowledge-rule-name" type="text" placeholder="Название правила" required>
+                  <input id="knowledge-rule-pattern" type="text" placeholder="Regex pattern" required>
+                  <textarea id="knowledge-rule-description" rows="2" placeholder="Описание срабатывания"></textarea>
+                  <textarea id="knowledge-rule-suggestion" rows="2" placeholder="Подсказка исправления"></textarea>
+                  <select id="knowledge-rule-source-id">
+                    <option value="">Источник: не выбран</option>
+                  </select>
+                  <select id="knowledge-rule-severity">
+                    <option value="low">low</option>
+                    <option value="medium" selected>medium</option>
+                    <option value="high">high</option>
+                    <option value="critical">critical</option>
+                  </select>
+                  <button class="btn-small" type="submit">Добавить правило</button>
+                  <div id="knowledge-rule-error" class="form-error hidden"></div>
+                </form>
+                <div id="knowledge-rules-list" class="admin-list knowledge-list-scroll"></div>
+              </div>
+            </div>
+            <div class="results-section">
+              <h4>Снимки Policy</h4>
+              <div class="inline-actions">
+                <button class="btn-small" onclick="createKnowledgeSnapshot()">Создать снимок</button>
+                <button class="btn-small" onclick="loadKnowledgeSnapshots()">Обновить список</button>
+              </div>
+              <div id="knowledge-snapshots-list" class="admin-list"></div>
+            </div>
+            <div class="results-section">
+              <h4>Лента изменений базы знаний</h4>
+              <div id="knowledge-audit-list" class="admin-list"></div>
+            </div>
+          </div>
         </div>
         <div id="chat-dock" class="chat-dock hidden">
           <button id="chat-scroll-down-btn" class="chat-scroll-down-btn hidden" onclick="scrollChatToBottom()">↓</button>
@@ -265,6 +376,22 @@ const pages = {
                       placeholder="Напишите сообщение... (Enter для отправки)"
                       rows="1"></textarea>
             <button onclick="sendChatMessage()" class="chat-send-btn">➤</button>
+          </div>
+        </div>
+
+        <div id="knowledge-edit-modal" class="modal-overlay hidden">
+          <div class="modal-card">
+            <div class="modal-header">
+              <h3 id="knowledge-edit-title">Редактирование</h3>
+              <button class="btn-small" onclick="closeKnowledgeEditModal()">✕</button>
+            </div>
+            <form id="knowledge-edit-form" class="form-stack">
+              <div id="knowledge-edit-fields"></div>
+              <div class="inline-actions">
+                <button type="submit" class="btn-small">Сохранить</button>
+                <button type="button" class="btn-small btn-danger" onclick="closeKnowledgeEditModal()">Отмена</button>
+              </div>
+            </form>
           </div>
         </div>
       </div>

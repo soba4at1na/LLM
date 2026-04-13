@@ -39,9 +39,11 @@ async function uploadTrainingDocument(input) {
   showLoading('Загружаем документ для дообучения...');
   try {
     const token = localStorage.getItem('llm_auth_token');
+    const confidentiality = (document.getElementById('training-confidentiality')?.value || 'confidential').trim();
     const form = new FormData();
     form.append('file', file);
     form.append('purpose', 'training');
+    form.append('confidentiality_level', confidentiality);
 
     const res = await fetch('/api/documents/upload', {
       method: 'POST',
@@ -75,6 +77,7 @@ async function loadTrainingDocuments() {
         <div class="admin-list-item">
           <div><strong>${escapeHtmlSafe(d.filename)}</strong></div>
           <div>Слов: ${d.word_count} | Размер: ${d.file_size} байт</div>
+          <div>Конфиденциальность: ${escapeHtmlSafe(d.confidentiality_level || 'confidential')}</div>
           <div>Создан: ${escapeHtmlSafe(d.created_at || '')}</div>
           <div class="inline-actions">
             <button id="training-preview-btn-${d.id}" class="btn-small" onclick="toggleTrainingPreview(${d.id})">
@@ -117,7 +120,7 @@ async function renderTrainingPreview(id) {
   try {
     const data = await apiGetWithAuth(`/api/documents/${id}/content`);
     panel.innerHTML = `
-      <div class="doc-meta"><strong>${escapeHtmlSafe(data.filename)}</strong> | purpose: ${escapeHtmlSafe(data.purpose)}</div>
+      <div class="doc-meta"><strong>${escapeHtmlSafe(data.filename)}</strong> | purpose: ${escapeHtmlSafe(data.purpose)} | confidentiality: ${escapeHtmlSafe(data.confidentiality_level || 'confidential')}</div>
       <pre>${escapeHtmlSafe(data.extracted_text || '')}</pre>
     `;
   } catch (e) {
@@ -146,6 +149,7 @@ async function previewDocumentContent(documentId, targetId = 'analyzed-document-
       <div class="doc-meta">
         <strong>${escapeHtmlSafe(data.filename)}</strong>
         <span> | purpose: ${escapeHtmlSafe(data.purpose)}</span>
+        <span> | confidentiality: ${escapeHtmlSafe(data.confidentiality_level || 'confidential')}</span>
       </div>
       <pre>${escapeHtmlSafe(data.extracted_text || '')}</pre>
     `;

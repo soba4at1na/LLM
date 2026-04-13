@@ -27,6 +27,7 @@ class DocumentUploadResponse(BaseModel):
     id: int
     filename: str
     purpose: str
+    confidentiality_level: str
     file_size: int
     word_count: int
     chunk_count: int
@@ -38,6 +39,7 @@ class DocumentListItem(BaseModel):
     filename: str
     source_type: str
     purpose: str
+    confidentiality_level: str
     file_size: int
     word_count: int
     owner_id: str | None = None
@@ -49,6 +51,7 @@ class DocumentContentResponse(BaseModel):
     id: int
     filename: str
     purpose: str
+    confidentiality_level: str
     source_type: str
     file_size: int
     word_count: int
@@ -63,6 +66,7 @@ class DocumentContentResponse(BaseModel):
 async def upload_document(
     file: UploadFile = File(...),
     purpose: str = Form(default="check"),
+    confidentiality_level: str = Form(default="confidential"),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
     request: Request = None,
@@ -73,6 +77,9 @@ async def upload_document(
     purpose = (purpose or "check").strip().lower()
     if purpose not in {"check", "training"}:
         raise HTTPException(status_code=400, detail="Invalid purpose. Allowed: check, training")
+    confidentiality_level = (confidentiality_level or "confidential").strip().lower()
+    if confidentiality_level not in {"public", "confidential"}:
+        raise HTTPException(status_code=400, detail="Invalid confidentiality level. Allowed: public, confidential")
 
     payload = await file.read()
     if len(payload) == 0:
@@ -96,6 +103,7 @@ async def upload_document(
         ).order_by(desc(DocumentRecord.id))
     )
     if same_file:
+        same_file.confidentiality_level = confidentiality_level
         chunk_count_existing = await db.scalar(
             select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_file.id)
         )
@@ -113,6 +121,7 @@ async def upload_document(
             id=same_file.id,
             filename=same_file.filename,
             purpose=same_file.purpose,
+            confidentiality_level=same_file.confidentiality_level,
             file_size=same_file.file_size,
             word_count=same_file.word_count,
             chunk_count=int(chunk_count_existing or 0),
@@ -138,6 +147,7 @@ async def upload_document(
         ).order_by(desc(DocumentRecord.id))
     )
     if same_text:
+        same_text.confidentiality_level = confidentiality_level
         chunk_count_existing = await db.scalar(
             select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_text.id)
         )
@@ -155,6 +165,7 @@ async def upload_document(
             id=same_text.id,
             filename=same_text.filename,
             purpose=same_text.purpose,
+            confidentiality_level=same_text.confidentiality_level,
             file_size=same_text.file_size,
             word_count=same_text.word_count,
             chunk_count=int(chunk_count_existing or 0),
@@ -168,6 +179,7 @@ async def upload_document(
         extension=extension,
         source_type="upload",
         purpose=purpose,
+        confidentiality_level=confidentiality_level,
         file_size=len(payload),
         file_hash=file_hash,
         file_content=payload,
@@ -202,6 +214,7 @@ async def upload_document(
             "filename": document.filename,
             "source_type": document.source_type,
             "purpose": document.purpose,
+            "confidentiality_level": document.confidentiality_level,
             "file_size": document.file_size,
             "file_hash": document.file_hash,
             "text_hash": document.text_hash,
@@ -215,6 +228,7 @@ async def upload_document(
         id=document.id,
         filename=document.filename,
         purpose=document.purpose,
+        confidentiality_level=document.confidentiality_level,
         file_size=document.file_size,
         word_count=document.word_count,
         chunk_count=len(chunk_rows),
@@ -227,6 +241,7 @@ async def list_documents(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     purpose: str | None = Query(default=None),
+    confidentiality_level: str | None = Query(default=None),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -241,6 +256,8 @@ async def list_documents(
         query = query.where(DocumentRecord.owner_id == current_user.id)
     if purpose is not None:
         query = query.where(DocumentRecord.purpose == purpose)
+    if confidentiality_level is not None:
+        query = query.where(DocumentRecord.confidentiality_level == confidentiality_level)
 
     rows = (await db.execute(query)).all()
     return [
@@ -249,6 +266,7 @@ async def list_documents(
             filename=doc.filename,
             source_type=doc.source_type,
             purpose=doc.purpose,
+            confidentiality_level=doc.confidentiality_level,
             file_size=doc.file_size,
             word_count=doc.word_count,
             owner_id=str(doc.owner_id) if current_user.is_admin else None,
@@ -278,6 +296,7 @@ async def get_document(
         id=document.id,
         filename=document.filename,
         purpose=document.purpose,
+        confidentiality_level=document.confidentiality_level,
         file_size=document.file_size,
         word_count=document.word_count,
         chunk_count=int(chunk_count or 0),
@@ -313,6 +332,7 @@ async def get_document_content(
         id=document.id,
         filename=document.filename,
         purpose=document.purpose,
+        confidentiality_level=document.confidentiality_level,
         source_type=document.source_type,
         file_size=document.file_size,
         word_count=document.word_count,

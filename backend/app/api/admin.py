@@ -47,6 +47,7 @@ class UserSummaryItem(BaseModel):
     username: str
     is_active: bool
     is_admin: bool
+    role: str
     documents_count: int
     check_documents_count: int
     training_documents_count: int
@@ -170,6 +171,7 @@ async def get_users_summary(
             User.username,
             User.is_active,
             User.is_admin,
+            User.role,
             User.created_at,
             User.last_login_at,
             func.count(distinct(DocumentRecord.id)).label("documents_count"),
@@ -186,7 +188,16 @@ async def get_users_summary(
         .outerjoin(DocumentRecord, DocumentRecord.owner_id == User.id)
         .outerjoin(AnalysisRun, AnalysisRun.user_id == User.id)
         .outerjoin(AuditLog, AuditLog.user_id == User.id)
-        .group_by(User.id, User.email, User.username, User.is_active, User.is_admin, User.created_at, User.last_login_at)
+        .group_by(
+            User.id,
+            User.email,
+            User.username,
+            User.is_active,
+            User.is_admin,
+            User.role,
+            User.created_at,
+            User.last_login_at,
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -202,6 +213,7 @@ async def get_users_summary(
             username=str(username),
             is_active=bool(is_active),
             is_admin=bool(is_admin),
+            role=str(role or "user"),
             documents_count=int(documents_count or 0),
             check_documents_count=int(check_documents_count or 0),
             training_documents_count=int(training_documents_count or 0),
@@ -216,6 +228,7 @@ async def get_users_summary(
             username,
             is_active,
             is_admin,
+            role,
             created_at,
             last_login_at,
             documents_count,

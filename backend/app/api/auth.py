@@ -40,6 +40,7 @@ class UserResponse(BaseModel):
     username: str
     is_active: bool
     is_admin: bool
+    role: str
 
     class Config:
         from_attributes = True
@@ -70,6 +71,7 @@ async def register(
             is_active=True,
             is_verified=False,
             is_admin=False,
+            role="user",
         )
 
         db.add(new_user)
@@ -93,6 +95,7 @@ async def register(
             "username": new_user.username,
             "is_active": new_user.is_active,
             "is_admin": new_user.is_admin,
+            "role": new_user.role or "user",
         }
 
     except HTTPException:
@@ -139,7 +142,7 @@ async def login(
 
     user.last_login_at = func.now()
     access_token = create_access_token(
-        data={"sub": str(user.id), "username": user.username}
+        data={"sub": str(user.id), "username": user.username, "role": (user.role or "user")}
     )
     await log_event(
         db,
@@ -165,6 +168,7 @@ async def read_users_me(
         "username": current_user.username,
         "is_active": current_user.is_active,
         "is_admin": current_user.is_admin,
+        "role": current_user.role or "user",
     }
 
 

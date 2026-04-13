@@ -17,6 +17,7 @@ class AnalysisRun(Base):
     summary = Column(Text, nullable=False, default="")
     raw_response = Column(JSON, nullable=False, default=dict)
     model_mode = Column(Text, nullable=False, default="mock")  # mock | llm
+    policy_hash = Column(Text, nullable=True)
     processing_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

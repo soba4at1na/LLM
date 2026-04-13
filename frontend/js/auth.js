@@ -123,7 +123,7 @@ async function loadUserInfo() {
     applyRoleBasedMenu(user);
     const savedView = localStorage.getItem('llm_last_view');
     const userViews = new Set(['dashboard', 'training', 'check', 'chat']);
-    const adminViews = new Set(['dashboard', 'admin-overview', 'admin-documents', 'admin-users', 'admin-audit']);
+    const adminViews = new Set(['dashboard', 'admin-overview', 'admin-documents', 'admin-users', 'admin-knowledge', 'admin-audit']);
     if (user.is_admin) {
       const target = adminViews.has(savedView) ? savedView : 'admin-overview';
       navTo(target);
@@ -152,10 +152,12 @@ async function loadUserInfo() {
     const adminOverview = document.getElementById('admin-menu-overview');
     const adminDocuments = document.getElementById('admin-menu-documents');
     const adminUsers = document.getElementById('admin-menu-users');
+    const adminKnowledge = document.getElementById('admin-menu-knowledge');
     const adminAudit = document.getElementById('admin-menu-audit');
     if (adminOverview && !user.is_admin) adminOverview.classList.add('hidden');
     if (adminDocuments && !user.is_admin) adminDocuments.classList.add('hidden');
     if (adminUsers && !user.is_admin) adminUsers.classList.add('hidden');
+    if (adminKnowledge && !user.is_admin) adminKnowledge.classList.add('hidden');
     if (adminAudit && !user.is_admin) adminAudit.classList.add('hidden');
 
   } catch (err) {
@@ -173,7 +175,7 @@ function doLogout() {
 function applyRoleBasedMenu(user) {
   const userMenus = ['menu-training', 'menu-check', 'menu-chat'];
   const userSubmenus = ['chat-submenu'];
-  const adminMenus = ['admin-menu-overview', 'admin-menu-documents', 'admin-menu-users', 'admin-menu-audit'];
+  const adminMenus = ['admin-menu-overview', 'admin-menu-documents', 'admin-menu-users', 'admin-menu-knowledge', 'admin-menu-audit'];
 
   userMenus.forEach(id => {
     const el = document.getElementById(id);

@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from app.core.database import Base
@@ -14,6 +14,12 @@ class DocumentRecord(Base):
     extension = Column(String(16), nullable=True)
     source_type = Column(String(20), nullable=False, default="upload")  # upload | text
     purpose = Column(String(20), nullable=False, default="check")  # check | training
+    confidentiality_level = Column(
+        String(20),
+        nullable=False,
+        default="confidential",
+        server_default=text("'confidential'"),
+    )  # public | confidential
     file_size = Column(Integer, nullable=False, default=0)
     file_hash = Column(String(64), nullable=True, index=True)
     file_content = Column(LargeBinary, nullable=True)

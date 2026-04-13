@@ -6,6 +6,7 @@ let analyzedCurrentText = '';
 let analyzedIssueDetails = [];
 let issueAppliedState = [];
 let currentAnalysisId = null;
+let isAnalyzeInProgress = false;
 
 function handleFileSelect(input) {
   const file = input.files[0];
@@ -24,6 +25,7 @@ function clearFile() {
 }
 
 async function startAnalysis() {
+  if (isAnalyzeInProgress) return;
   const token = localStorage.getItem('llm_auth_token');
   const fileInput = document.getElementById('file-input');
   const textInput = document.getElementById('document-text');
@@ -31,14 +33,18 @@ async function startAnalysis() {
 
   hideError();
   document.getElementById('analysis-results')?.classList.add('hidden');
+  setAnalyzeBusy(true);
+  isAnalyzeInProgress = true;
 
   try {
     if (fileInput?.files?.length) {
       showLoading('Загрузка и анализ документа...');
       const file = fileInput.files[0];
+      const confidentiality = (document.getElementById('check-confidentiality')?.value || 'confidential').trim();
       const form = new FormData();
       form.append('file', file);
       form.append('purpose', 'check');
+      form.append('confidentiality_level', confidentiality);
 
       const uploadRes = await fetch('/api/documents/upload', {
         method: 'POST',
@@ -54,7 +60,7 @@ async function startAnalysis() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ document_id: currentCheckDocumentId })
       });
-      if (!analyzeRes.ok) throw new Error(`Ошибка анализа ${analyzeRes.status}: ${await analyzeRes.text()}`);
+      if (!analyzeRes.ok) throw new Error(await extractApiErrorMessage(analyzeRes, `Ошибка анализа ${analyzeRes.status}`));
       const data = await analyzeRes.json();
       await showResults(data);
       return;
@@ -69,15 +75,19 @@ async function startAnalysis() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ text, filename: 'inline_text.txt' })
       });
-      if (!res.ok) throw new Error(`Ошибка анализа ${res.status}: ${await res.text()}`);
+      if (!res.ok) throw new Error(await extractApiErrorMessage(res, `Ошибка анализа ${res.status}`));
       const data = await res.json();
       currentCheckDocumentId = data.document_id;
       await showResults(data);
       return;
     }
+
+    showError('Выберите файл или введите текст для анализа');
   } catch (err) {
     showError(err.message || 'Ошибка анализа');
   } finally {
+    isAnalyzeInProgress = false;
+    setAnalyzeBusy(false);
     hideLoading();
   }
 }
@@ -161,6 +171,7 @@ function buildHighlightedHtml(text, details, appliedState) {
     const fragment = String(detail.fragment || '').trim();
     if (!fragment) return;
     const suggestionRaw = String(detail.suggestion || '');
+    const replacementRaw = String(detail.replacement || '').trim();
     const markerText = appliedState[i] ? suggestionRaw : fragment;
     if (!markerText.trim()) return;
     const safeMarker = escapeHtml(markerText);
@@ -170,18 +181,9 @@ function buildHighlightedHtml(text, details, appliedState) {
     const confidenceBadge = confidence === 'low'
       ? '<div class="issue-popover-confidence low">Низкая уверенность</div>'
       : '';
-    const btnText = appliedState[i] ? 'Откатить' : 'Применить';
-    const replacement = `
-      <span class="issue-mark" id="issue-mark-${i}" onclick="toggleIssuePopover(${i}, event)">
-        ${safeMarker}
-        <span class="issue-popover">
-          ${confidenceBadge}
-          <div class="issue-popover-text">${suggestion}</div>
-          ${reason ? `<div class="issue-popover-reason">${reason}</div>` : ''}
-          <button class="btn-small" onclick="toggleIssueFix(${i}, event)">${btnText}</button>
-        </span>
-      </span>
-    `;
+    const canApply = Boolean(replacementRaw) && replacementRaw !== fragment;
+    const btnText = appliedState[i] ? 'Откатить' : (canApply ? 'Применить' : 'Нет автозамены');
+    const replacement = `<span class="issue-mark" id="issue-mark-${i}" onclick="toggleIssuePopover(${i}, event)">${safeMarker}<span class="issue-popover">${confidenceBadge}<div class="issue-popover-text">${suggestion}</div>${reason ? `<div class="issue-popover-reason">${reason}</div>` : ''}<button class="btn-small" onclick="toggleIssueFix(${i}, event)">${btnText}</button></span></span>`;
     const nextHtml = html.replace(safeMarker, replacement);
     if (nextHtml !== html) {
       anyHighlightApplied = true;
@@ -201,16 +203,17 @@ function toggleIssueFix(index, event) {
   const detail = analyzedIssueDetails[index];
   if (!detail) return;
   const fragment = String(detail.fragment || '');
-  const suggestion = String(detail.suggestion || '');
-  if (!fragment || !suggestion) return;
+  const replacement = String(detail.replacement || '').trim();
+  if (!fragment) return;
 
   if (!issueAppliedState[index]) {
-    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, suggestion);
+    if (!replacement || replacement === fragment) return;
+    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, replacement);
     if (!result.replaced) return;
     analyzedCurrentText = result.text;
     issueAppliedState[index] = true;
   } else {
-    const result = replaceFirstOccurrence(analyzedCurrentText, suggestion, fragment);
+    const result = replaceFirstOccurrence(analyzedCurrentText, replacement, fragment);
     if (!result.replaced) return;
     analyzedCurrentText = result.text;
     issueAppliedState[index] = false;
@@ -267,6 +270,33 @@ function clearResults() {
   hideError();
 }
 
+function setAnalyzeBusy(isBusy) {
+  const btn = document.getElementById('analyze-btn');
+  if (!btn) return;
+  btn.disabled = !!isBusy;
+  btn.classList.toggle('is-busy', !!isBusy);
+  const textEl = btn.querySelector('.btn-text');
+  const spinner = btn.querySelector('.spinner');
+  if (textEl) textEl.textContent = isBusy ? 'Выполняется анализ...' : '🚀 Начать анализ';
+  if (spinner) spinner.classList.toggle('hidden', !isBusy);
+}
+
+async function extractApiErrorMessage(response, fallback) {
+  try {
+    const text = await response.text();
+    if (!text) return fallback;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.detail === 'string') return parsed.detail;
+      return fallback;
+    } catch (_) {
+      return text.slice(0, 300);
+    }
+  } catch (_) {
+    return fallback;
+  }
+}
+
 async function loadLatestAnalysisForUser() {
   const token = localStorage.getItem('llm_auth_token');
   if (!token) return;
@@ -300,6 +330,51 @@ async function loadLatestAnalysisForUser() {
   }
 }
 
+async function exportCurrentAnalysis(format) {
+  const token = localStorage.getItem('llm_auth_token');
+  if (!token) return showError('Требуется авторизация');
+  if (!currentAnalysisId) return showError('Сначала выполните анализ документа');
+  const normalizedFormat = String(format || '').toLowerCase();
+  if (!['json', 'pdf'].includes(normalizedFormat)) return showError('Неизвестный формат экспорта');
+
+  try {
+    showLoading(`Готовим отчет (${normalizedFormat.toUpperCase()})...`);
+    const res = await fetch(`/api/analysis/${currentAnalysisId}/export?format=${encodeURIComponent(normalizedFormat)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`Ошибка экспорта ${res.status}: ${await res.text()}`);
+
+    const blob = await res.blob();
+    const defaultName = `analysis_${currentAnalysisId}.${normalizedFormat}`;
+    const filename = getFilenameFromDisposition(res.headers.get('Content-Disposition')) || defaultName;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    showError(err.message || 'Не удалось экспортировать отчет');
+  } finally {
+    hideLoading();
+  }
+}
+
+function getFilenameFromDisposition(disposition) {
+  if (!disposition) return null;
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch (_) {}
+  }
+  const plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  if (plainMatch && plainMatch[1]) return plainMatch[1].trim();
+  return null;
+}
+
 function escapeHtml(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;')
@@ -317,6 +392,7 @@ window.clearFile = clearFile;
 window.toggleIssueFix = toggleIssueFix;
 window.toggleIssuePopover = toggleIssuePopover;
 window.loadLatestAnalysisForUser = loadLatestAnalysisForUser;
+window.exportCurrentAnalysis = exportCurrentAnalysis;
 
 if (!window.__issuePopoverGlobalClickBound) {
   document.addEventListener('click', () => closeIssuePopovers());

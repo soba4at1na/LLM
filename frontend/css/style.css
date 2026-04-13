@@ -267,7 +267,7 @@ body {
 }
 
 .chat-submenu {
-  padding: 0 12px 12px 12px;
+  padding: 12px 12px 12px 12px;
   animation: submenuReveal 0.18s ease;
 }
 
@@ -299,11 +299,7 @@ body {
   grid-template-columns: 1fr auto;
   gap: 6px;
   align-items: center;
-  transition: transform 0.18s ease, opacity 0.18s ease;
-}
-
-.chat-list-item:hover {
-  transform: translateX(2px);
+  transition: opacity 0.18s ease;
 }
 
 .chat-list-open {
@@ -318,6 +314,12 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.chat-list-open:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #fff;
 }
 
 .chat-list-item.active .chat-list-open {
@@ -740,6 +742,12 @@ body {
   font-size: 1.1rem;
 }
 
+#analyze-btn:disabled,
+#analyze-btn.is-busy {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
 /* Results */
 .results-container {
   margin-top: 40px;
@@ -751,6 +759,13 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.results-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .score-card {
@@ -822,7 +837,7 @@ body {
 }
 
 .results-section {
-  margin-bottom: 24px;
+  margin-top: 24px;
   padding: 20px;
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -1064,6 +1079,49 @@ body {
   gap: 12px;
 }
 
+.admin-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.admin-grid > .results-section {
+  min-width: 0;
+}
+
+.form-stack {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  min-width: 0;
+}
+
+.form-stack input,
+.form-stack select,
+.form-stack textarea {
+  min-width: 0;
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #fff;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.form-stack input:focus,
+.form-stack select:focus,
+.form-stack textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.form-stack select option {
+  background: #161622;
+  color: #fff;
+}
+
 .admin-list-item {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
@@ -1071,12 +1129,130 @@ body {
   padding: 12px 14px;
   display: grid;
   gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.knowledge-list-scroll {
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.knowledge-list-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.knowledge-list-scroll::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.55);
+  border-radius: 999px;
+}
+
+.knowledge-list-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+.knowledge-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.knowledge-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.knowledge-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.knowledge-sub {
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.admin-list-item.item-inactive {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 20, 0.75);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(560px, calc(100vw - 32px));
+  background: #161622;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+#knowledge-test-text {
+  resize: none;
+  overflow: hidden;
+  min-height: 92px;
+}
+
+#knowledge-edit-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.knowledge-edit-control {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #fff;
+}
+
+.knowledge-edit-control:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.form-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--danger);
+  background: rgba(239, 68, 68, 0.15);
+  color: #fecaca;
+  font-size: 0.85rem;
 }
 
 .inline-actions {
   display: flex;
   gap: 8px;
-  margin-top: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
 .doc-viewer {
@@ -1124,14 +1300,6 @@ body {
   z-index: 30;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
-}
-
-.issue-mark:hover .issue-popover {
-  display: block;
-}
-
-.issue-mark:focus-within .issue-popover {
-  display: block;
 }
 
 .issue-mark.open .issue-popover {

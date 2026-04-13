@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, String, DateTime, func
+from sqlalchemy import Boolean, Column, String, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 from app.core.database import Base
@@ -47,6 +47,12 @@ class User(Base):
         Boolean,
         default=False
     )
+    role = Column(
+        String(32),
+        nullable=False,
+        default="user",
+        server_default=text("'user'")
+    )
     
     created_at = Column(
         DateTime(timezone=True),
@@ -69,6 +75,7 @@ class User(Base):
             "is_active": self.is_active,
             "is_verified": self.is_verified,
             "is_admin": self.is_admin,
+            "role": self.role,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
         }

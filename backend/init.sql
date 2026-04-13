@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_active BOOLEAN DEFAULT TRUE,
     is_verified BOOLEAN DEFAULT FALSE,
     is_admin BOOLEAN DEFAULT FALSE,
+    role VARCHAR(32) NOT NULL DEFAULT 'user',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_login_at TIMESTAMP WITH TIME ZONE,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -15,10 +16,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'user';
+UPDATE users SET role = 'user' WHERE role IS NULL;
+UPDATE users SET role = 'admin' WHERE is_admin IS TRUE AND role <> 'admin';
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_is_admin ON users(is_admin);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 CREATE TABLE IF NOT EXISTS documents (
     id BIGSERIAL PRIMARY KEY,
@@ -28,6 +33,7 @@ CREATE TABLE IF NOT EXISTS documents (
     extension VARCHAR(16),
     source_type VARCHAR(20) NOT NULL DEFAULT 'upload',
     purpose VARCHAR(20) NOT NULL DEFAULT 'check',
+    confidentiality_level VARCHAR(20) NOT NULL DEFAULT 'confidential',
     file_size INTEGER NOT NULL DEFAULT 0,
     file_hash VARCHAR(64),
     file_content BYTEA,
@@ -40,14 +46,81 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS purpose VARCHAR(20) DEFAULT 'check';
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS confidentiality_level VARCHAR(20) DEFAULT 'confidential';
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS file_hash VARCHAR(64);
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS text_hash VARCHAR(64);
+UPDATE documents SET confidentiality_level = 'confidential' WHERE confidentiality_level IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_documents_owner_id ON documents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_documents_purpose ON documents(purpose);
+CREATE INDEX IF NOT EXISTS idx_documents_confidentiality_level ON documents(confidentiality_level);
 CREATE INDEX IF NOT EXISTS idx_documents_file_hash ON documents(file_hash);
 CREATE INDEX IF NOT EXISTS idx_documents_text_hash ON documents(text_hash);
+
+CREATE TABLE IF NOT EXISTS source_references (
+    id BIGSERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    section VARCHAR(128),
+    reference_code VARCHAR(128),
+    url_or_local_path VARCHAR(1024),
+    note TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_references_active ON source_references(is_active);
+
+CREATE TABLE IF NOT EXISTS glossary_terms (
+    id BIGSERIAL PRIMARY KEY,
+    term VARCHAR(255) NOT NULL,
+    normalized_term VARCHAR(255) NOT NULL,
+    canonical_definition TEXT NOT NULL,
+    allowed_variants JSONB NOT NULL DEFAULT '[]'::jsonb,
+    forbidden_variants JSONB NOT NULL DEFAULT '[]'::jsonb,
+    category VARCHAR(64),
+    severity_default VARCHAR(16) NOT NULL DEFAULT 'medium',
+    source_ref_id BIGINT REFERENCES source_references(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_glossary_terms_term ON glossary_terms(term);
+CREATE INDEX IF NOT EXISTS idx_glossary_terms_normalized_term ON glossary_terms(normalized_term);
+CREATE INDEX IF NOT EXISTS idx_glossary_terms_active ON glossary_terms(is_active);
+CREATE INDEX IF NOT EXISTS idx_glossary_terms_source_ref_id ON glossary_terms(source_ref_id);
+
+CREATE TABLE IF NOT EXISTS rule_patterns (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    rule_type VARCHAR(32) NOT NULL DEFAULT 'regex',
+    pattern TEXT NOT NULL,
+    description TEXT,
+    severity VARCHAR(16) NOT NULL DEFAULT 'medium',
+    suggestion_template TEXT,
+    source_ref_id BIGINT REFERENCES source_references(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_patterns_rule_type ON rule_patterns(rule_type);
+CREATE INDEX IF NOT EXISTS idx_rule_patterns_active ON rule_patterns(is_active);
+CREATE INDEX IF NOT EXISTS idx_rule_patterns_source_ref_id ON rule_patterns(source_ref_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_policy_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    label VARCHAR(255),
+    policy_hash VARCHAR(64) NOT NULL,
+    snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_policy_snapshots_hash ON knowledge_policy_snapshots(policy_hash);
+CREATE INDEX IF NOT EXISTS idx_knowledge_policy_snapshots_created_at ON knowledge_policy_snapshots(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS document_chunks (
     id BIGSERIAL PRIMARY KEY,
@@ -74,9 +147,12 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     summary TEXT NOT NULL DEFAULT '',
     raw_response JSONB NOT NULL DEFAULT '{}'::jsonb,
     model_mode TEXT NOT NULL DEFAULT 'mock',
+    policy_hash TEXT,
     processing_ms INTEGER,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS policy_hash TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_document_id ON analysis_runs(document_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_user_id ON analysis_runs(user_id);

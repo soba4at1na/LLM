@@ -45,6 +45,7 @@ function navTo(viewName) {
     'admin-overview': 'admin-menu-overview',
     'admin-documents': 'admin-menu-documents',
     'admin-users': 'admin-menu-users',
+    'admin-knowledge': 'admin-menu-knowledge',
     'admin-audit': 'admin-menu-audit',
   };
   const activeItem = document.getElementById(menuByView[viewName] || '');
@@ -58,6 +59,7 @@ function navTo(viewName) {
     'admin-overview': '🛡️ Админка',
     'admin-documents': '🗂️ Документы',
     'admin-users': '👥 Пользователи',
+    'admin-knowledge': '🧠 База знаний',
     'admin-audit': '📜 Аудит'
   };
   const titleEl = document.getElementById('page-title');
@@ -102,6 +104,10 @@ function navTo(viewName) {
 
   if (viewName === 'admin-users' && typeof loadAdminUsersSummary === 'function') {
     loadAdminUsersSummary();
+  }
+
+  if (viewName === 'admin-knowledge' && typeof loadAdminKnowledge === 'function') {
+    loadAdminKnowledge();
   }
 
   if (viewName === 'training' && typeof loadTrainingDocuments === 'function') {
