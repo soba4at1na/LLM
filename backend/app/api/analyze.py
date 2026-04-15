@@ -19,7 +19,7 @@ from app.utils.auth import get_current_active_user
 from app.utils.text_processor import build_chunk_rows, count_words, sha256_text
 
 router = APIRouter()
-ANALYSIS_PIPELINE_VERSION = "2026-04-13-v2"
+ANALYSIS_PIPELINE_VERSION = "2026-04-15-v3"
 
 
 class AnalyzeRequest(BaseModel):
@@ -698,6 +698,28 @@ def _looks_placeholder_analysis(result: AnalyzeResponse) -> bool:
     return False
 
 
+def _sanitize_auto_replacement(fragment: str, replacement: str | None) -> str | None:
+    frag = str(fragment or "").strip()
+    repl = str(replacement or "").strip()
+    if not frag or not repl:
+        return None
+    if frag == repl:
+        return None
+    if "\n" in frag or "\n" in repl:
+        return None
+
+    # Allow auto-apply only for short local edits (typos/dates), not sentence rewrites.
+    frag_words = len(re.findall(r"\w+", frag, flags=re.UNICODE))
+    repl_words = len(re.findall(r"\w+", repl, flags=re.UNICODE))
+    if len(frag) > 80 or len(repl) > 80:
+        return None
+    if frag_words == 0 or repl_words == 0:
+        return None
+    if frag_words > 4 or repl_words > 4:
+        return None
+    return repl
+
+
 def _extract_issue_details(raw_response: dict | None) -> List[dict]:
     if not isinstance(raw_response, dict):
         return []
@@ -717,7 +739,7 @@ def _extract_issue_details(raw_response: dict | None) -> List[dict]:
         severity = severity_raw if severity_raw in {"low", "medium", "high", "critical"} else "medium"
         source_ref = item.get("source_ref")
         rule_origin = str(item.get("rule_origin", "")).strip() or None
-        replacement = str(item.get("replacement", "")).strip() or None
+        replacement = _sanitize_auto_replacement(fragment, item.get("replacement"))
         if fragment and suggestion:
             out.append(
                 {
@@ -754,7 +776,7 @@ def _prepare_issue_details(
             severity = severity_raw if severity_raw in {"low", "medium", "high", "critical"} else "medium"
             source_ref = item.get("source_ref")
             rule_origin = str(item.get("rule_origin", "")).strip() or None
-            replacement = str(item.get("replacement", "")).strip() or None
+            replacement = _sanitize_auto_replacement(fragment, item.get("replacement"))
             if fragment and suggestion:
                 aligned_fragment = _align_fragment_to_text(text, fragment)
                 details.append(
@@ -792,7 +814,7 @@ def _prepare_issue_details(
                     {
                         "fragment": fragment,
                         "suggestion": recommendation,
-                        "replacement": recommendation,
+                        "replacement": None,
                         "reason": reason,
                         "confidence": "low",
                     "severity": "medium",
@@ -807,7 +829,7 @@ def _prepare_issue_details(
             {
                 "fragment": fallback_fragment,
                 "suggestion": recommendations[0] if recommendations else "Уточните формулировки и добавьте конкретику.",
-                "replacement": recommendations[0] if recommendations else "Уточните формулировки и добавьте конкретику.",
+                "replacement": None,
                 "reason": issues[0] if issues else "Найдены потенциальные улучшения.",
                 "confidence": "low",
                 "severity": "medium",
@@ -993,6 +1015,7 @@ def _normalize_analysis_for_render(result: AnalyzeResponse, text: str) -> Analyz
             continue
         normalized = dict(item)
         normalized["fragment"] = fragment
+        normalized["replacement"] = _sanitize_auto_replacement(fragment, item.get("replacement"))
         normalized_details.append(normalized)
 
     return AnalyzeResponse(
@@ -1088,6 +1111,16 @@ def _run_builtin_quality_checks(text: str, max_findings: int = 24) -> dict:
     recommendations: list[str] = []
     details: list[dict] = []
 
+    def expand_to_token_bounds(start_idx: int, token_len: int) -> str:
+        left = max(0, int(start_idx))
+        right = min(len(src), int(start_idx) + int(token_len))
+        # Expand to full token so UI highlight covers whole misspelled word.
+        while left > 0 and (src[left - 1].isalnum() or src[left - 1] in {"_", "-"}):
+            left -= 1
+        while right < len(src) and (src[right].isalnum() or src[right] in {"_", "-"}):
+            right += 1
+        return src[left:right]
+
     typo_map = {
         "безопастност": "безопасност",
         "правельно": "правильно",
@@ -1105,17 +1138,28 @@ def _run_builtin_quality_checks(text: str, max_findings: int = 24) -> dict:
         "инжинер": "инженер",
         "лезиш": "лезешь",
     }
+    def build_token_replacement(fragment: str, bad_stem: str, good_stem: str) -> str:
+        frag = str(fragment or "")
+        frag_l = frag.lower()
+        idx_local = frag_l.find(bad_stem)
+        if idx_local < 0:
+            return good_stem
+        prefix = frag[:idx_local]
+        suffix = frag[idx_local + len(bad_stem):]
+        return f"{prefix}{good_stem}{suffix}"
+
     for bad, good in typo_map.items():
         idx = src_l.find(bad)
         if idx >= 0:
-            fragment = src[idx:idx + len(bad)]
+            fragment = expand_to_token_bounds(idx, len(bad))
+            replacement = build_token_replacement(fragment, bad, good)
             issues.append(f"Орфографическая ошибка: «{bad}».")
             recommendations.append(f"Проверьте правописание и используйте форму, близкую к «{good}...».")
             details.append(
                 {
                     "fragment": fragment,
                     "suggestion": good,
-                    "replacement": good,
+                    "replacement": replacement,
                     "reason": "Обнаружено слово с высокой вероятностью орфографической ошибки.",
                     "confidence": "high",
                     "severity": "medium",

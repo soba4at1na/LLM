@@ -172,7 +172,7 @@ function buildHighlightedHtml(text, details, appliedState) {
     if (!fragment) return;
     const suggestionRaw = String(detail.suggestion || '');
     const replacementRaw = String(detail.replacement || '').trim();
-    const markerText = appliedState[i] ? suggestionRaw : fragment;
+    const markerText = appliedState[i] ? String(detail._appliedReplacement || suggestionRaw) : fragment;
     if (!markerText.trim()) return;
     const safeMarker = escapeHtml(markerText);
     const suggestion = escapeHtml(detail.suggestion || 'Нет рекомендации');
@@ -208,14 +208,18 @@ function toggleIssueFix(index, event) {
 
   if (!issueAppliedState[index]) {
     if (!replacement || replacement === fragment) return;
-    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, replacement);
+    const replacementWithCase = applyReplacementCase(fragment, replacement);
+    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, replacementWithCase);
     if (!result.replaced) return;
     analyzedCurrentText = result.text;
+    detail._appliedReplacement = replacementWithCase;
     issueAppliedState[index] = true;
   } else {
-    const result = replaceFirstOccurrence(analyzedCurrentText, replacement, fragment);
+    const appliedReplacement = String(detail._appliedReplacement || replacement);
+    const result = replaceFirstOccurrence(analyzedCurrentText, appliedReplacement, fragment);
     if (!result.replaced) return;
     analyzedCurrentText = result.text;
+    detail._appliedReplacement = '';
     issueAppliedState[index] = false;
   }
   renderAnalyzedDocument();
@@ -229,6 +233,35 @@ function replaceFirstOccurrence(source, search, replacement) {
   const before = source.slice(0, start);
   const after = source.slice(start + String(search).length);
   return { text: `${before}${replacement}${after}`, replaced: true };
+}
+
+function applyReplacementCase(sourceFragment, replacement) {
+  const src = String(sourceFragment || '');
+  const dst = String(replacement || '');
+  if (!src || !dst) return dst;
+
+  const lettersOnly = src.replace(/[^A-Za-zА-Яа-яЁё]/g, '');
+  if (lettersOnly && lettersOnly === lettersOnly.toUpperCase()) {
+    return dst.toUpperCase();
+  }
+
+  const firstLetterIdx = src.search(/[A-Za-zА-Яа-яЁё]/);
+  if (firstLetterIdx >= 0) {
+    const firstLetter = src[firstLetterIdx];
+    const isCapitalized = firstLetter === firstLetter.toUpperCase();
+    if (isCapitalized) {
+      const dstFirstLetterIdx = dst.search(/[A-Za-zА-Яа-яЁё]/);
+      if (dstFirstLetterIdx >= 0) {
+        return (
+          dst.slice(0, dstFirstLetterIdx) +
+          dst[dstFirstLetterIdx].toUpperCase() +
+          dst.slice(dstFirstLetterIdx + 1)
+        );
+      }
+    }
+  }
+
+  return dst;
 }
 
 function closeIssuePopovers() {

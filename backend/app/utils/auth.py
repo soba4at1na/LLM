@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -14,6 +15,7 @@ from app.models.user import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+logger = logging.getLogger(__name__)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -70,8 +72,8 @@ async def get_current_user(
     try:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
-    except Exception as e:
-        print(f"Database error in get_current_user: {e}")
+    except Exception:
+        logger.exception("Database error in get_current_user")
         raise credentials_exception
     
     if user is None or not user.is_active:

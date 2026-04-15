@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -18,6 +19,7 @@ from app.utils.auth import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class UserRegister(BaseModel):
@@ -100,9 +102,10 @@ async def register(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ошибка регистрации: {str(e)}")
+        logger.exception("Unexpected error during user registration")
+        raise HTTPException(status_code=500, detail="Ошибка регистрации")
 
 
 @router.post("/login", response_model=Token)

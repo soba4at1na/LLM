@@ -133,7 +133,7 @@ async def upload_document(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}") from e
+        raise HTTPException(status_code=400, detail="Failed to parse file") from e
 
     if not extracted_text:
         raise HTTPException(status_code=400, detail="Could not extract text from file")

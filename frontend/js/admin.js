@@ -85,6 +85,14 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(String(value ?? ''));
+  } catch (_) {
+    return String(value ?? '');
+  }
+}
+
 function setInlineError(id, message = '') {
   const el = document.getElementById(id);
   if (!el) return;
@@ -208,7 +216,7 @@ async function loadAdminDocuments(purpose = 'all') {
         <div>Время: ${escapeHtml(item.created_at || '')}</div>
         <div class="inline-actions">
           <button class="btn-small" onclick="previewDocumentContent(${item.id}, 'admin-document-preview')">Просмотр</button>
-          <button class="btn-small btn-danger" onclick="adminDeleteDocument(${item.id}, '${escapeHtml(item.filename || '')}')">Удалить</button>
+          <button class="btn-small btn-danger" onclick="adminDeleteDocument(${item.id}, '${encodeURIComponent(String(item.filename || ''))}')">Удалить</button>
         </div>
       </div>
     `).join('') + '<div id="admin-document-preview" class="doc-viewer"></div>';
@@ -218,7 +226,8 @@ async function loadAdminDocuments(purpose = 'all') {
   }
 }
 
-async function adminDeleteDocument(documentId, filename = '') {
+async function adminDeleteDocument(documentId, encodedFilename = '') {
+  const filename = safeDecodeURIComponent(encodedFilename);
   const namePart = filename ? ` "${filename}"` : '';
   if (!confirm(`Удалить документ${namePart} (ID ${documentId})?`)) return;
   try {
@@ -236,7 +245,8 @@ function toggleBlockedUsersFilter() {
   loadAdminUsersSummary(adminUsersSort);
 }
 
-async function setUserActive(userId, isActive) {
+async function setUserActive(encodedUserId, isActive) {
+  const userId = safeDecodeURIComponent(encodedUserId);
   try {
     const result = await apiPatch(`/api/admin/users/${encodeURIComponent(userId)}/status`, { is_active: isActive });
     if (!result.ok) throw new Error(result.message || 'Не удалось обновить статус');
@@ -279,8 +289,8 @@ async function loadAdminUsersSummary(sortBy = 'last_login') {
         <div>Последняя активность: ${escapeHtml(item.last_activity_at || '—')}</div>
         <div class="inline-actions">
           ${item.is_active
-            ? `<button class="btn-small btn-danger" onclick="setUserActive('${escapeHtml(item.user_id)}', false)">Заблокировать</button>`
-            : `<button class="btn-small" onclick="setUserActive('${escapeHtml(item.user_id)}', true)">Разблокировать</button>`}
+            ? `<button class="btn-small btn-danger" onclick="setUserActive('${encodeURIComponent(String(item.user_id || ''))}', false)">Заблокировать</button>`
+            : `<button class="btn-small" onclick="setUserActive('${encodeURIComponent(String(item.user_id || ''))}', true)">Разблокировать</button>`}
         </div>
       </div>
     `).join('');

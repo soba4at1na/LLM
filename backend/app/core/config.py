@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     MODEL_N_THREADS: int = 14
     MODEL_N_THREADS_BATCH: int = 14
     MODEL_N_BATCH: int = 512
+    MODEL_USE_MLOCK: bool = False
+    MODEL_USE_MMAP: bool = True
     LLM_REQUEST_TIMEOUT_SECONDS: int = 180
     
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]

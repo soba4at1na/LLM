@@ -20,38 +20,53 @@ class LLMService:
     def is_initialized(self) -> bool:
         return self._initialized and self.model is not None
 
-    def _resolve_model_path(self) -> Path:
+    def _candidate_model_paths(self) -> list[Path]:
         configured_path = Path(settings.MODEL_PATH)
-        if configured_path.exists():
-            return configured_path
-
-        fallbacks = [
+        candidates = [
+            configured_path,
             Path("models") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
             Path(__file__).resolve().parents[2] / "models" / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
             Path("Model") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
         ]
-        for path in fallbacks:
-            if path.exists():
-                logger.info("Model found at fallback path: %s", path)
-                return path
 
-        return configured_path
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key = str(path.resolve()) if path.exists() else str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(path)
+        return unique
 
     async def initialize(self) -> None:
         if self._initialized:
             return
 
-        model_path = self._resolve_model_path()
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model not found: {model_path}")
+        candidate_paths = self._candidate_model_paths()
+        existing_paths = [p for p in candidate_paths if p.exists()]
 
-        logger.info("Loading model: %s", model_path.name)
-        self.model = await asyncio.to_thread(
-            self._create_model_sync,
-            str(model_path),
-        )
-        self._initialized = True
-        logger.info("Model loaded successfully")
+        if not existing_paths:
+            tried = ", ".join(str(p) for p in candidate_paths)
+            raise FileNotFoundError(f"Model not found. Tried: {tried}")
+
+        last_error: Exception | None = None
+        for model_path in existing_paths:
+            logger.info("Loading model: %s", model_path.name)
+            try:
+                self.model = await asyncio.to_thread(
+                    self._create_model_sync,
+                    str(model_path),
+                )
+                self._initialized = True
+                logger.info("Model loaded successfully from: %s", model_path)
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Failed to load model from %s: %s", model_path, exc)
+
+        tried_existing = ", ".join(str(p) for p in existing_paths)
+        raise RuntimeError(f"Failed to load any available model. Tried: {tried_existing}") from last_error
 
     @staticmethod
     def _create_model_sync(model_path: str) -> Llama:
@@ -64,8 +79,8 @@ class LLMService:
             n_batch=settings.MODEL_N_BATCH,
             rope_freq_base=1_000_000,
             verbose=False,
-            use_mlock=True,
-            use_mmap=True,
+            use_mlock=settings.MODEL_USE_MLOCK,
+            use_mmap=settings.MODEL_USE_MMAP,
         )
 
     def generate(

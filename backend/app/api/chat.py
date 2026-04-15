@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import List, Optional
 
@@ -15,13 +16,14 @@ from app.services.retrieval_service import retrieval_service
 from app.utils.auth import get_current_active_user
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=12000)
     chat_id: Optional[int] = Field(default=None, ge=1)
     temperature: Optional[float] = Field(default=0.35, ge=0.0, le=1.5)
-    max_tokens: Optional[int] = Field(default=1024, ge=64, le=4096)
+    max_tokens: Optional[int] = Field(default=768, ge=64, le=4096)
 
 
 class ChatResponse(BaseModel):
@@ -103,8 +105,8 @@ async def _load_recent_history_block(
     *,
     user_id,
     thread_id: int,
-    limit_messages: int = 12,
-    max_chars: int = 3200,
+    limit_messages: int = 8,
+    max_chars: int = 1800,
 ) -> str:
     rows = (
         await db.execute(
@@ -166,7 +168,7 @@ async def chat_endpoint(
             top_k=3,
             min_score=0.25,
         )
-        context_block = retrieval_service.build_context(chunks)
+        context_block = retrieval_service.build_context(chunks, max_chars=2200)
     has_context = bool(context_block.strip())
     history_block = await _load_recent_history_block(
         db,
@@ -278,9 +280,10 @@ async def chat_endpoint(
             usage=result.get("usage"),
         )
 
-    except Exception as e:
+    except Exception:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unexpected error during chat request")
+        raise HTTPException(status_code=500, detail="Ошибка сервиса чата")
 
 
 @router.get("/chat/history", response_model=List[ChatHistoryItem])

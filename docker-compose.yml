@@ -4,14 +4,14 @@ services:
     container_name: llm_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER:-llm_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-llm_secure_pass}
-      POSTGRES_DB: ${DB_NAME:-llm_db}
+      POSTGRES_USER: ${DB_USER:?DB_USER_is_required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD_is_required}
+      POSTGRES_DB: ${DB_NAME:?DB_NAME_is_required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-llm_user} -d ${DB_NAME:-llm_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:?DB_USER_is_required} -d ${DB_NAME:?DB_NAME_is_required}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,8 +25,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-llm_user}:${DB_PASSWORD:-llm_secure_pass}@db:5432/${DB_NAME:-llm_db}
-      SECRET_KEY: ${SECRET_KEY:-change_me_in_production}
+      DATABASE_URL: postgresql+asyncpg://${DB_USER:?DB_USER_is_required}:${DB_PASSWORD:?DB_PASSWORD_is_required}@db:5432/${DB_NAME:?DB_NAME_is_required}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY_is_required}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       MODEL_PATH: ${MODEL_PATH:-/app/models/qwen2.5-14b-instruct-uncensored-q5_k_m.gguf}
       MODEL_N_CTX: ${MODEL_N_CTX:-3072}
@@ -34,6 +34,8 @@ services:
       MODEL_N_THREADS: ${MODEL_N_THREADS:-10}
       MODEL_N_THREADS_BATCH: ${MODEL_N_THREADS_BATCH:-10}
       MODEL_N_BATCH: ${MODEL_N_BATCH:-256}
+      MODEL_USE_MLOCK: ${MODEL_USE_MLOCK:-false}
+      MODEL_USE_MMAP: ${MODEL_USE_MMAP:-true}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-240}
       DISABLE_LLM: ${DISABLE_LLM:-false}
       CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
