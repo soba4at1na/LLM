@@ -103,6 +103,24 @@ DB_BOOTSTRAP_STATEMENTS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_import_candidates (
+        id BIGSERIAL PRIMARY KEY,
+        source_ref_id BIGINT NOT NULL REFERENCES source_references(id) ON DELETE CASCADE,
+        document_id BIGINT REFERENCES documents(id) ON DELETE CASCADE,
+        term VARCHAR(255) NOT NULL,
+        normalized_term VARCHAR(255) NOT NULL,
+        canonical_definition TEXT NOT NULL,
+        confidence VARCHAR(16) NOT NULL DEFAULT 'medium',
+        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+        reviewed_by VARCHAR(64),
+        reviewed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_knowledge_import_candidates_source_ref_id ON knowledge_import_candidates(source_ref_id)",
+    "CREATE INDEX IF NOT EXISTS idx_knowledge_import_candidates_document_id ON knowledge_import_candidates(document_id)",
+    "CREATE INDEX IF NOT EXISTS idx_knowledge_import_candidates_status ON knowledge_import_candidates(status)",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_policy_snapshots_hash ON knowledge_policy_snapshots(policy_hash)",
     "CREATE INDEX IF NOT EXISTS idx_knowledge_policy_snapshots_created_at ON knowledge_policy_snapshots(created_at DESC)",
     """

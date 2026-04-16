@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=12000)
     chat_id: Optional[int] = Field(default=None, ge=1)
     temperature: Optional[float] = Field(default=0.35, ge=0.0, le=1.5)
-    max_tokens: Optional[int] = Field(default=768, ge=64, le=4096)
+    max_tokens: Optional[int] = Field(default=512, ge=64, le=4096)
 
 
 class ChatResponse(BaseModel):
@@ -105,8 +105,8 @@ async def _load_recent_history_block(
     *,
     user_id,
     thread_id: int,
-    limit_messages: int = 8,
-    max_chars: int = 1800,
+    limit_messages: int = 6,
+    max_chars: int = 1200,
 ) -> str:
     rows = (
         await db.execute(
@@ -165,16 +165,20 @@ async def chat_endpoint(
             db,
             owner_id=current_user.id,
             query=request.message,
-            top_k=3,
+            top_k=2,
+            scan_limit=120,
             min_score=0.25,
         )
-        context_block = retrieval_service.build_context(chunks, max_chars=2200)
+        context_block = retrieval_service.build_context(chunks, max_chars=1600)
     has_context = bool(context_block.strip())
-    history_block = await _load_recent_history_block(
-        db,
-        user_id=current_user.id,
-        thread_id=thread.id,
-    )
+    include_history = len(request.message.strip()) >= 20
+    history_block = ""
+    if include_history:
+        history_block = await _load_recent_history_block(
+            db,
+            user_id=current_user.id,
+            thread_id=thread.id,
+        )
 
     context_section = ""
     if has_context:

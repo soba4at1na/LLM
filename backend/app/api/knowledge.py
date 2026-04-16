@@ -1,21 +1,22 @@
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.knowledge import GlossaryTerm, KnowledgePolicySnapshot, RulePattern, SourceReference
+from app.models.knowledge import GlossaryTerm, KnowledgeImportCandidate, KnowledgePolicySnapshot, RulePattern, SourceReference
 from app.models.user import User
 from app.services.audit_service import log_event
-from app.services.rule_engine import rule_engine
+from app.services.rule_engine import BUILTIN_REGEX_RULES, rule_engine
 from app.utils.auth import get_current_admin_user
 
 router = APIRouter()
 
-ALLOWED_RULE_TYPES = {"regex", "lemma", "triplet"}
+ALLOWED_RULE_TYPES = {"regex"}
 ALLOWED_SEVERITIES = {"low", "medium", "high", "critical"}
 
 DEFAULT_SOURCES = [
@@ -106,7 +107,7 @@ def _normalize_severity(value: str | None) -> str:
 def _normalize_rule_type(value: str | None) -> str:
     normalized = str(value or "regex").strip().lower()
     if normalized not in ALLOWED_RULE_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid rule_type. Allowed: regex, lemma, triplet")
+        raise HTTPException(status_code=400, detail="Invalid rule_type. Allowed: regex")
     return normalized
 
 
@@ -236,6 +237,27 @@ class GlossaryTermOut(BaseModel):
     updated_at: Optional[str] = None
 
 
+class ImportCandidateOut(BaseModel):
+    id: int
+    source_ref_id: int
+    source_ref_title: Optional[str] = None
+    document_id: Optional[int] = None
+    term: str
+    normalized_term: str
+    canonical_definition: str
+    confidence: str
+    status: str
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    created_at: str
+
+
+class CandidateBulkActionRequest(BaseModel):
+    candidate_ids: List[int] = Field(default_factory=list)
+    source_ref_id: Optional[int] = None
+    apply_to_all_pending: bool = False
+
+
 class RulePatternCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     rule_type: str = "regex"
@@ -322,6 +344,44 @@ def _rule_to_out(item: RulePattern, source_title: str | None = None) -> RulePatt
     )
 
 
+def _candidate_to_out(item: KnowledgeImportCandidate, source_title: str | None = None) -> ImportCandidateOut:
+    return ImportCandidateOut(
+        id=int(item.id),
+        source_ref_id=int(item.source_ref_id),
+        source_ref_title=source_title,
+        document_id=int(item.document_id) if item.document_id is not None else None,
+        term=item.term,
+        normalized_term=item.normalized_term,
+        canonical_definition=item.canonical_definition,
+        confidence=str(item.confidence or "medium"),
+        status=str(item.status or "pending"),
+        reviewed_by=item.reviewed_by,
+        reviewed_at=item.reviewed_at.isoformat() if item.reviewed_at else None,
+        created_at=item.created_at.isoformat(),
+    )
+
+
+def _builtin_rule_to_out(
+    idx: int,
+    rule: dict,
+    source_title: str | None = None,
+) -> RulePatternOut:
+    return RulePatternOut(
+        id=10000 + idx,
+        name=str(rule.get("name") or f"builtin_rule_{idx}"),
+        rule_type=str(rule.get("rule_type") or "regex"),
+        pattern=str(rule.get("pattern") or ""),
+        description=str(rule.get("description") or "") or None,
+        severity=_normalize_severity(rule.get("severity")),
+        suggestion_template=str(rule.get("suggestion_template") or "") or None,
+        source_ref_id=None,
+        source_ref_title=source_title,
+        is_active=bool(rule.get("is_active", True)),
+        created_at="1970-01-01T00:00:00+00:00",
+        updated_at=None,
+    )
+
+
 async def _ensure_source_exists(db: AsyncSession, source_ref_id: int | None) -> None:
     if source_ref_id is None:
         return
@@ -352,12 +412,6 @@ async def _serialize_policy(db: AsyncSession) -> dict:
             select(GlossaryTerm).order_by(GlossaryTerm.id)
         )
     ).scalars().all()
-    rules = (
-        await db.execute(
-            select(RulePattern).order_by(RulePattern.id)
-        )
-    ).scalars().all()
-
     return {
         "sources": [
             {
@@ -386,20 +440,7 @@ async def _serialize_policy(db: AsyncSession) -> dict:
             }
             for item in glossary
         ],
-        "rules": [
-            {
-                "id": int(item.id),
-                "name": item.name,
-                "rule_type": item.rule_type,
-                "pattern": item.pattern,
-                "description": item.description,
-                "severity": item.severity,
-                "suggestion_template": item.suggestion_template,
-                "source_ref_id": int(item.source_ref_id) if item.source_ref_id else None,
-                "is_active": bool(item.is_active),
-            }
-            for item in rules
-        ],
+        "rules": BUILTIN_REGEX_RULES,
     }
 
 
@@ -410,20 +451,18 @@ async def knowledge_overview(
 ):
     sources_count = await db.scalar(select(func.count(SourceReference.id)))
     glossary_terms_count = await db.scalar(select(func.count(GlossaryTerm.id)))
-    rule_patterns_count = await db.scalar(select(func.count(RulePattern.id)))
     active_glossary_terms_count = await db.scalar(
         select(func.count(GlossaryTerm.id)).where(GlossaryTerm.is_active.is_(True))
     )
-    active_rule_patterns_count = await db.scalar(
-        select(func.count(RulePattern.id)).where(RulePattern.is_active.is_(True))
-    )
+    rule_patterns_count = len(BUILTIN_REGEX_RULES)
+    active_rule_patterns_count = len([x for x in BUILTIN_REGEX_RULES if bool(x.get("is_active", True))])
 
     return KnowledgeOverview(
         sources_count=int(sources_count or 0),
         glossary_terms_count=int(glossary_terms_count or 0),
-        rule_patterns_count=int(rule_patterns_count or 0),
+        rule_patterns_count=int(rule_patterns_count),
         active_glossary_terms_count=int(active_glossary_terms_count or 0),
-        active_rule_patterns_count=int(active_rule_patterns_count or 0),
+        active_rule_patterns_count=int(active_rule_patterns_count),
     )
 
 
@@ -518,7 +557,7 @@ async def restore_snapshot(
     payload = snapshot.snapshot_json
     sources = payload.get("sources", []) if isinstance(payload.get("sources", []), list) else []
     glossary = payload.get("glossary", []) if isinstance(payload.get("glossary", []), list) else []
-    rules = payload.get("rules", []) if isinstance(payload.get("rules", []), list) else []
+    _ = payload.get("rules", []) if isinstance(payload.get("rules", []), list) else []
 
     await db.execute(delete(RulePattern))
     await db.execute(delete(GlossaryTerm))
@@ -563,40 +602,12 @@ async def restore_snapshot(
         )
     await db.flush()
 
-    for item in rules:
-        if not isinstance(item, dict):
-            continue
-        rule_name = str(item.get("name", "")).strip()
-        pattern = str(item.get("pattern", ""))
-        if not rule_name or not pattern:
-            continue
-        rule_type = _normalize_rule_type(item.get("rule_type"))
-        _validate_pattern(rule_type, pattern)
-        db.add(
-            RulePattern(
-                id=int(item.get("id", 0)) or None,
-                name=rule_name,
-                rule_type=rule_type,
-                pattern=pattern,
-                description=str(item.get("description", "")).strip() or None,
-                severity=_normalize_severity(item.get("severity")),
-                suggestion_template=str(item.get("suggestion_template", "")).strip() or None,
-                source_ref_id=int(item.get("source_ref_id")) if item.get("source_ref_id") is not None else None,
-                is_active=bool(item.get("is_active", True)),
-            )
-        )
-    await db.flush()
-
     await db.execute(
         select(func.setval("source_references_id_seq", func.coalesce(func.max(SourceReference.id), 1), True))
     )
     await db.execute(
         select(func.setval("glossary_terms_id_seq", func.coalesce(func.max(GlossaryTerm.id), 1), True))
     )
-    await db.execute(
-        select(func.setval("rule_patterns_id_seq", func.coalesce(func.max(RulePattern.id), 1), True))
-    )
-
     new_hash = await rule_engine.compute_policy_hash(db)
     await log_event(
         db,
@@ -668,31 +679,6 @@ async def seed_defaults(
         )
         db.add(term)
         created_glossary += 1
-
-    for rule_payload in DEFAULT_RULES:
-        existing = await db.scalar(
-            select(RulePattern).where(
-                RulePattern.name == rule_payload["name"],
-                RulePattern.pattern == rule_payload["pattern"],
-            )
-        )
-        if existing:
-            continue
-        source_ref_id = await _source_id_by_code(db, rule_payload.get("source_code"))
-        rule_type = _normalize_rule_type(rule_payload["rule_type"])
-        _validate_pattern(rule_type, rule_payload["pattern"])
-        rule = RulePattern(
-            name=rule_payload["name"],
-            rule_type=rule_type,
-            pattern=rule_payload["pattern"],
-            description=rule_payload["description"],
-            severity=_normalize_severity(rule_payload["severity"]),
-            suggestion_template=rule_payload["suggestion_template"],
-            source_ref_id=source_ref_id,
-            is_active=True,
-        )
-        db.add(rule)
-        created_rules += 1
 
     await log_event(
         db,
@@ -781,6 +767,17 @@ async def update_source(
         item.note = payload.note.strip() or None
     if payload.is_active is not None:
         item.is_active = payload.is_active
+        if payload.is_active is False:
+            await db.execute(
+                update(GlossaryTerm)
+                .where(GlossaryTerm.source_ref_id == item.id)
+                .values(is_active=False)
+            )
+            await db.execute(
+                update(RulePattern)
+                .where(RulePattern.source_ref_id == item.id)
+                .values(is_active=False)
+            )
 
     await log_event(
         db,
@@ -805,6 +802,16 @@ async def delete_source(
     if not item:
         raise HTTPException(status_code=404, detail="Source reference not found")
     item.is_active = False
+    await db.execute(
+        update(GlossaryTerm)
+        .where(GlossaryTerm.source_ref_id == item.id)
+        .values(is_active=False)
+    )
+    await db.execute(
+        update(RulePattern)
+        .where(RulePattern.source_ref_id == item.id)
+        .values(is_active=False)
+    )
     await log_event(
         db,
         action="knowledge_source_deactivate",
@@ -815,6 +822,48 @@ async def delete_source(
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.delete("/admin/knowledge/sources/{source_id}/permanent")
+async def delete_source_permanently(
+    source_id: int,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item = await db.scalar(select(SourceReference).where(SourceReference.id == source_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Source reference not found")
+
+    glossary_count = await db.scalar(
+        select(func.count(GlossaryTerm.id)).where(GlossaryTerm.source_ref_id == item.id)
+    )
+    rules_count = await db.scalar(
+        select(func.count(RulePattern.id)).where(RulePattern.source_ref_id == item.id)
+    )
+
+    await db.execute(delete(GlossaryTerm).where(GlossaryTerm.source_ref_id == item.id))
+    await db.execute(delete(RulePattern).where(RulePattern.source_ref_id == item.id))
+    await db.delete(item)
+
+    await log_event(
+        db,
+        action="knowledge_source_delete_permanent",
+        user_id=admin_user.id,
+        resource_type="source_reference",
+        resource_id=str(source_id),
+        metadata={
+            "source_title": item.title,
+            "glossary_deleted": int(glossary_count or 0),
+            "rules_deleted": int(rules_count or 0),
+        },
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "source_id": source_id,
+        "glossary_deleted": int(glossary_count or 0),
+        "rules_deleted": int(rules_count or 0),
+    }
 
 
 @router.get("/admin/knowledge/glossary", response_model=List[GlossaryTermOut])
@@ -945,6 +994,154 @@ async def delete_glossary_term(
     return {"ok": True}
 
 
+@router.get("/admin/knowledge/import-candidates", response_model=List[ImportCandidateOut])
+async def list_import_candidates(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    status: str = Query(default="pending"),
+    source_ref_id: Optional[int] = Query(default=None),
+    _: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    normalized_status = str(status or "pending").strip().lower()
+    if normalized_status not in {"pending", "approved", "rejected", "all"}:
+        raise HTTPException(status_code=400, detail="Invalid status. Allowed: pending, approved, rejected, all")
+
+    query = (
+        select(KnowledgeImportCandidate, SourceReference.title)
+        .join(SourceReference, SourceReference.id == KnowledgeImportCandidate.source_ref_id)
+        .order_by(desc(KnowledgeImportCandidate.id))
+        .limit(limit)
+        .offset(offset)
+    )
+    if normalized_status != "all":
+        query = query.where(KnowledgeImportCandidate.status == normalized_status)
+    if source_ref_id is not None:
+        query = query.where(KnowledgeImportCandidate.source_ref_id == source_ref_id)
+
+    rows = (await db.execute(query)).all()
+    return [_candidate_to_out(item, str(title) if title else None) for item, title in rows]
+
+
+async def _select_candidates_for_action(
+    db: AsyncSession,
+    payload: CandidateBulkActionRequest,
+) -> list[KnowledgeImportCandidate]:
+    query = select(KnowledgeImportCandidate).where(KnowledgeImportCandidate.status == "pending")
+    if payload.apply_to_all_pending:
+        if payload.source_ref_id is not None:
+            query = query.where(KnowledgeImportCandidate.source_ref_id == payload.source_ref_id)
+        return (await db.execute(query)).scalars().all()
+
+    if not payload.candidate_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="candidate_ids required when apply_to_all_pending=false",
+        )
+    query = query.where(KnowledgeImportCandidate.id.in_(payload.candidate_ids))
+    return (await db.execute(query)).scalars().all()
+
+
+@router.post("/admin/knowledge/import-candidates/approve")
+async def approve_import_candidates(
+    payload: CandidateBulkActionRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    candidates = await _select_candidates_for_action(db, payload)
+    if not candidates:
+        return {"ok": True, "approved": 0, "created_terms": 0, "updated_terms": 0}
+
+    created_terms = 0
+    updated_terms = 0
+    now = datetime.now(timezone.utc)
+    for item in candidates:
+        existing_term = await db.scalar(
+            select(GlossaryTerm).where(
+                GlossaryTerm.normalized_term == item.normalized_term,
+                GlossaryTerm.source_ref_id == item.source_ref_id,
+            )
+        )
+        if existing_term:
+            existing_term.term = item.term
+            existing_term.canonical_definition = item.canonical_definition
+            existing_term.is_active = True
+            updated_terms += 1
+        else:
+            db.add(
+                GlossaryTerm(
+                    term=item.term,
+                    normalized_term=item.normalized_term,
+                    canonical_definition=item.canonical_definition,
+                    allowed_variants=[item.term],
+                    forbidden_variants=[],
+                    category="import-approved",
+                    severity_default="medium",
+                    source_ref_id=item.source_ref_id,
+                    is_active=True,
+                )
+            )
+            created_terms += 1
+
+        item.status = "approved"
+        item.reviewed_by = str(admin_user.id)
+        item.reviewed_at = now
+
+    await log_event(
+        db,
+        action="knowledge_import_candidates_approve",
+        user_id=admin_user.id,
+        resource_type="knowledge_import_candidates",
+        resource_id=str(len(candidates)),
+        metadata={
+            "approved": len(candidates),
+            "created_terms": created_terms,
+            "updated_terms": updated_terms,
+            "source_ref_id": payload.source_ref_id,
+            "apply_to_all_pending": payload.apply_to_all_pending,
+        },
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "approved": len(candidates),
+        "created_terms": created_terms,
+        "updated_terms": updated_terms,
+    }
+
+
+@router.post("/admin/knowledge/import-candidates/reject")
+async def reject_import_candidates(
+    payload: CandidateBulkActionRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+):
+    candidates = await _select_candidates_for_action(db, payload)
+    if not candidates:
+        return {"ok": True, "rejected": 0}
+
+    now = datetime.now(timezone.utc)
+    for item in candidates:
+        item.status = "rejected"
+        item.reviewed_by = str(admin_user.id)
+        item.reviewed_at = now
+
+    await log_event(
+        db,
+        action="knowledge_import_candidates_reject",
+        user_id=admin_user.id,
+        resource_type="knowledge_import_candidates",
+        resource_id=str(len(candidates)),
+        metadata={
+            "rejected": len(candidates),
+            "source_ref_id": payload.source_ref_id,
+            "apply_to_all_pending": payload.apply_to_all_pending,
+        },
+    )
+    await db.commit()
+    return {"ok": True, "rejected": len(candidates)}
+
+
 @router.get("/admin/knowledge/rules", response_model=List[RulePatternOut])
 async def list_rules(
     limit: int = Query(default=200, ge=1, le=1000),
@@ -954,20 +1151,26 @@ async def list_rules(
     _: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    query = (
-        select(RulePattern, SourceReference.title)
-        .outerjoin(SourceReference, SourceReference.id == RulePattern.source_ref_id)
-        .order_by(desc(RulePattern.id))
-        .limit(limit)
-        .offset(offset)
-    )
-    if active_only:
-        query = query.where(RulePattern.is_active.is_(True))
-    if rule_type:
-        query = query.where(RulePattern.rule_type == _normalize_rule_type(rule_type))
-
-    rows = (await db.execute(query)).all()
-    return [_rule_to_out(item, str(title) if title else None) for item, title in rows]
+    normalized_rule_type = _normalize_rule_type(rule_type) if rule_type else None
+    sources = (
+        await db.execute(
+            select(SourceReference).where(SourceReference.is_active.is_(True))
+        )
+    ).scalars().all()
+    source_title_by_code = {
+        str(item.reference_code): item.title
+        for item in sources
+        if str(item.reference_code or "").strip()
+    }
+    result: list[RulePatternOut] = []
+    for idx, item in enumerate(BUILTIN_REGEX_RULES, start=1):
+        if active_only and not bool(item.get("is_active", True)):
+            continue
+        if normalized_rule_type and str(item.get("rule_type", "regex")) != normalized_rule_type:
+            continue
+        source_title = source_title_by_code.get(str(item.get("source_code", "")))
+        result.append(_builtin_rule_to_out(idx=idx, rule=item, source_title=source_title))
+    return result[offset : offset + limit]
 
 
 @router.post("/admin/knowledge/rules", response_model=RulePatternOut, status_code=status.HTTP_201_CREATED)
@@ -976,32 +1179,7 @@ async def create_rule(
     admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _ensure_source_exists(db, payload.source_ref_id)
-    item = RulePattern(
-        name=payload.name.strip(),
-        rule_type=_normalize_rule_type(payload.rule_type),
-        pattern=payload.pattern,
-        description=payload.description.strip() if payload.description else None,
-        severity=_normalize_severity(payload.severity),
-        suggestion_template=payload.suggestion_template.strip() if payload.suggestion_template else None,
-        source_ref_id=payload.source_ref_id,
-        is_active=payload.is_active,
-    )
-    _validate_pattern(item.rule_type, item.pattern)
-    db.add(item)
-    await db.flush()
-    await log_event(
-        db,
-        action="knowledge_rule_create",
-        user_id=admin_user.id,
-        resource_type="rule_pattern",
-        resource_id=str(item.id),
-        metadata={"name": item.name, "rule_type": item.rule_type},
-    )
-    await db.commit()
-    await db.refresh(item)
-    source_title = await db.scalar(select(SourceReference.title).where(SourceReference.id == item.source_ref_id))
-    return _rule_to_out(item, str(source_title) if source_title else None)
+    raise HTTPException(status_code=403, detail="Regex rules are built-in and read-only")
 
 
 @router.patch("/admin/knowledge/rules/{rule_id}", response_model=RulePatternOut)
@@ -1011,42 +1189,7 @@ async def update_rule(
     admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    item = await db.scalar(select(RulePattern).where(RulePattern.id == rule_id))
-    if not item:
-        raise HTTPException(status_code=404, detail="Rule pattern not found")
-
-    if payload.source_ref_id is not None:
-        await _ensure_source_exists(db, payload.source_ref_id)
-    if payload.name is not None:
-        item.name = payload.name.strip()
-    if payload.rule_type is not None:
-        item.rule_type = _normalize_rule_type(payload.rule_type)
-    if payload.pattern is not None:
-        item.pattern = payload.pattern
-    _validate_pattern(item.rule_type, item.pattern)
-    if payload.description is not None:
-        item.description = payload.description.strip() or None
-    if payload.severity is not None:
-        item.severity = _normalize_severity(payload.severity)
-    if payload.suggestion_template is not None:
-        item.suggestion_template = payload.suggestion_template.strip() or None
-    if payload.source_ref_id is not None:
-        item.source_ref_id = payload.source_ref_id
-    if payload.is_active is not None:
-        item.is_active = payload.is_active
-
-    await log_event(
-        db,
-        action="knowledge_rule_update",
-        user_id=admin_user.id,
-        resource_type="rule_pattern",
-        resource_id=str(item.id),
-        metadata={"name": item.name, "is_active": item.is_active},
-    )
-    await db.commit()
-    await db.refresh(item)
-    source_title = await db.scalar(select(SourceReference.title).where(SourceReference.id == item.source_ref_id))
-    return _rule_to_out(item, str(source_title) if source_title else None)
+    raise HTTPException(status_code=403, detail="Regex rules are built-in and read-only")
 
 
 @router.delete("/admin/knowledge/rules/{rule_id}")
@@ -1055,17 +1198,4 @@ async def delete_rule(
     admin_user: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
-    item = await db.scalar(select(RulePattern).where(RulePattern.id == rule_id))
-    if not item:
-        raise HTTPException(status_code=404, detail="Rule pattern not found")
-    item.is_active = False
-    await log_event(
-        db,
-        action="knowledge_rule_deactivate",
-        user_id=admin_user.id,
-        resource_type="rule_pattern",
-        resource_id=str(item.id),
-        metadata={"name": item.name},
-    )
-    await db.commit()
-    return {"ok": True}
+    raise HTTPException(status_code=403, detail="Regex rules are built-in and read-only")

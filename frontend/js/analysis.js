@@ -7,6 +7,9 @@ let analyzedIssueDetails = [];
 let issueAppliedState = [];
 let currentAnalysisId = null;
 let isAnalyzeInProgress = false;
+let pendingAnalysisPollTimer = null;
+
+const PENDING_ANALYSIS_KEY = 'llm_pending_analysis_v1';
 
 function handleFileSelect(input) {
   const file = input.files[0];
@@ -54,6 +57,12 @@ async function startAnalysis() {
       if (!uploadRes.ok) throw new Error(`Ошибка загрузки ${uploadRes.status}: ${await uploadRes.text()}`);
       const uploaded = await uploadRes.json();
       currentCheckDocumentId = uploaded.id;
+      savePendingAnalysisState({
+        started_at: new Date().toISOString(),
+        document_id: currentCheckDocumentId,
+        filename: String(file?.name || ''),
+        mode: 'file'
+      });
 
       const analyzeRes = await fetch('/api/analyze', {
         method: 'POST',
@@ -70,6 +79,12 @@ async function startAnalysis() {
       const text = textInput.value.trim();
       if (text.length < 30) return showError('Введите минимум 30 символов');
       showLoading('Анализируем текст...');
+      savePendingAnalysisState({
+        started_at: new Date().toISOString(),
+        document_id: null,
+        filename: 'inline_text.txt',
+        mode: 'inline'
+      });
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -84,6 +99,7 @@ async function startAnalysis() {
 
     showError('Выберите файл или введите текст для анализа');
   } catch (err) {
+    clearPendingAnalysisState();
     showError(err.message || 'Ошибка анализа');
   } finally {
     isAnalyzeInProgress = false;
@@ -183,7 +199,8 @@ function buildHighlightedHtml(text, details, appliedState) {
       : '';
     const canApply = Boolean(replacementRaw) && replacementRaw !== fragment;
     const btnText = appliedState[i] ? 'Откатить' : (canApply ? 'Применить' : 'Нет автозамены');
-    const replacement = `<span class="issue-mark" id="issue-mark-${i}" onclick="toggleIssuePopover(${i}, event)">${safeMarker}<span class="issue-popover">${confidenceBadge}<div class="issue-popover-text">${suggestion}</div>${reason ? `<div class="issue-popover-reason">${reason}</div>` : ''}<button class="btn-small" onclick="toggleIssueFix(${i}, event)">${btnText}</button></span></span>`;
+    const btnDisabledAttr = canApply || appliedState[i] ? '' : 'disabled';
+    const replacement = `<span class="issue-mark" id="issue-mark-${i}" onclick="toggleIssuePopover(${i}, event)">${safeMarker}<span class="issue-popover">${confidenceBadge}<div class="issue-popover-text">${suggestion}</div>${reason ? `<div class="issue-popover-reason">${reason}</div>` : ''}<button class="btn-small" ${btnDisabledAttr} onclick="toggleIssueFix(${i}, event)">${btnText}</button></span></span>`;
     const nextHtml = html.replace(safeMarker, replacement);
     if (nextHtml !== html) {
       anyHighlightApplied = true;
@@ -299,8 +316,54 @@ function clearResults() {
   analyzedIssueDetails = [];
   issueAppliedState = [];
   currentAnalysisId = null;
+  clearPendingAnalysisState();
   clearFile();
   hideError();
+}
+
+function applyAllFixes() {
+  if (!Array.isArray(analyzedIssueDetails) || analyzedIssueDetails.length === 0) return;
+  let changed = 0;
+  for (let i = 0; i < analyzedIssueDetails.length; i += 1) {
+    if (issueAppliedState[i]) continue;
+    const detail = analyzedIssueDetails[i];
+    if (!detail) continue;
+    const fragment = String(detail.fragment || '');
+    const replacement = String(detail.replacement || '').trim();
+    if (!fragment || !replacement || replacement === fragment) continue;
+    const replacementWithCase = applyReplacementCase(fragment, replacement);
+    const result = replaceFirstOccurrence(analyzedCurrentText, fragment, replacementWithCase);
+    if (!result.replaced) continue;
+    analyzedCurrentText = result.text;
+    detail._appliedReplacement = replacementWithCase;
+    issueAppliedState[i] = true;
+    changed += 1;
+  }
+  if (!changed) return showError('Нет доступных автозамен для применения');
+  closeIssuePopovers();
+  renderAnalyzedDocument();
+}
+
+function undoAllFixes() {
+  if (!Array.isArray(analyzedIssueDetails) || analyzedIssueDetails.length === 0) return;
+  let changed = 0;
+  for (let i = analyzedIssueDetails.length - 1; i >= 0; i -= 1) {
+    if (!issueAppliedState[i]) continue;
+    const detail = analyzedIssueDetails[i];
+    if (!detail) continue;
+    const fragment = String(detail.fragment || '');
+    const appliedReplacement = String(detail._appliedReplacement || detail.replacement || '').trim();
+    if (!fragment || !appliedReplacement) continue;
+    const result = replaceFirstOccurrence(analyzedCurrentText, appliedReplacement, fragment);
+    if (!result.replaced) continue;
+    analyzedCurrentText = result.text;
+    detail._appliedReplacement = '';
+    issueAppliedState[i] = false;
+    changed += 1;
+  }
+  if (!changed) return showError('Нет применённых автозамен для отката');
+  closeIssuePopovers();
+  renderAnalyzedDocument();
 }
 
 function setAnalyzeBusy(isBusy) {
@@ -358,9 +421,118 @@ async function loadLatestAnalysisForUser() {
       processing_ms: latest.processing_ms,
       analyzed_at: latest.created_at
     });
+    clearPendingAnalysisState();
   } catch (err) {
     console.warn('Не удалось загрузить последнюю проверку:', err);
   }
+
+  maybeResumePendingAnalysis();
+}
+
+function savePendingAnalysisState(payload) {
+  try {
+    localStorage.setItem(PENDING_ANALYSIS_KEY, JSON.stringify(payload || {}));
+  } catch (_) {}
+}
+
+function getPendingAnalysisState() {
+  try {
+    const raw = localStorage.getItem(PENDING_ANALYSIS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.started_at) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearPendingAnalysisState() {
+  try {
+    localStorage.removeItem(PENDING_ANALYSIS_KEY);
+  } catch (_) {}
+  if (pendingAnalysisPollTimer) {
+    clearTimeout(pendingAnalysisPollTimer);
+    pendingAnalysisPollTimer = null;
+  }
+}
+
+function maybeResumePendingAnalysis() {
+  const pending = getPendingAnalysisState();
+  if (!pending || pendingAnalysisPollTimer) return;
+
+  const pendingStartedMs = Date.parse(String(pending.started_at || ''));
+  if (!Number.isFinite(pendingStartedMs)) {
+    clearPendingAnalysisState();
+    return;
+  }
+
+  showLoading('Проверка продолжается... Подождите, результат скоро появится.');
+  const startedAt = Date.now();
+  const timeoutMs = 12 * 60 * 1000;
+
+  const tick = async () => {
+    try {
+      const token = localStorage.getItem('llm_auth_token');
+      if (!token) {
+        clearPendingAnalysisState();
+        hideLoading();
+        return;
+      }
+
+      const res = await fetch('/api/analysis/history?limit=5', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('history unavailable');
+      const history = await res.json();
+      const items = Array.isArray(history) ? history : [];
+
+      const candidate = items.find((item) => {
+        const createdMs = Date.parse(String(item?.created_at || ''));
+        if (!Number.isFinite(createdMs)) return false;
+        if (createdMs + 1500 < pendingStartedMs) return false;
+        const expectedDocId = pending.document_id;
+        if (expectedDocId !== null && expectedDocId !== undefined) {
+          return Number(item?.document_id) === Number(expectedDocId);
+        }
+        return true;
+      });
+
+      if (candidate) {
+        await showResults({
+          analysis_id: candidate.analysis_id,
+          document_id: candidate.document_id,
+          overall_score: candidate.overall_score,
+          readability_score: candidate.readability_score,
+          grammar_score: candidate.grammar_score,
+          structure_score: candidate.structure_score,
+          issues: candidate.issues || [],
+          recommendations: candidate.recommendations || [],
+          issue_details: candidate.issue_details || [],
+          summary: candidate.summary || 'Анализ завершён',
+          model_mode: candidate.run_mode || candidate.model_mode || 'unknown',
+          processing_ms: candidate.processing_ms,
+          analyzed_at: candidate.created_at
+        });
+        clearPendingAnalysisState();
+        hideLoading();
+        return;
+      }
+
+      if (Date.now() - startedAt > timeoutMs) {
+        clearPendingAnalysisState();
+        hideLoading();
+        showError('Не дождались завершения анализа. Можно запустить проверку заново.');
+        return;
+      }
+
+      pendingAnalysisPollTimer = setTimeout(tick, 3500);
+    } catch (_) {
+      pendingAnalysisPollTimer = setTimeout(tick, 4500);
+    }
+  };
+
+  pendingAnalysisPollTimer = setTimeout(tick, 800);
 }
 
 async function exportCurrentAnalysis(format) {
@@ -426,6 +598,8 @@ window.toggleIssueFix = toggleIssueFix;
 window.toggleIssuePopover = toggleIssuePopover;
 window.loadLatestAnalysisForUser = loadLatestAnalysisForUser;
 window.exportCurrentAnalysis = exportCurrentAnalysis;
+window.applyAllFixes = applyAllFixes;
+window.undoAllFixes = undoAllFixes;
 
 if (!window.__issuePopoverGlobalClickBound) {
   document.addEventListener('click', () => closeIssuePopovers());

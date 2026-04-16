@@ -3,7 +3,11 @@
 let adminDocFilter = 'all';
 let adminUsersSort = 'last_login';
 let adminOnlyBlocked = false;
+let adminPreviewOpenId = null;
 let knowledgeActiveOnly = false;
+let knowledgeGlossarySearch = '';
+let knowledgeGlossarySourceFilter = 'all';
+let knowledgeCandidateSourceFilter = 'all';
 const knowledgeStore = { sources: [], glossary: [], rules: [] };
 let knowledgeEditState = null;
 
@@ -74,6 +78,12 @@ async function apiDelete(path) {
     const body = await res.text();
     throw new Error(`Ошибка ${res.status}: ${body}`);
   }
+  if (res.status === 204) return { ok: true };
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return res.json();
+  }
+  return { ok: true };
 }
 
 function escapeHtml(text) {
@@ -215,15 +225,57 @@ async function loadAdminDocuments(purpose = 'all') {
         <div>Слов: ${Number(item.word_count || 0)} | Размер: ${Number(item.file_size || 0)} байт</div>
         <div>Время: ${escapeHtml(item.created_at || '')}</div>
         <div class="inline-actions">
-          <button class="btn-small" onclick="previewDocumentContent(${item.id}, 'admin-document-preview')">Просмотр</button>
+          <button id="admin-preview-btn-${item.id}" class="btn-small" onclick="toggleAdminDocumentPreview(${item.id})">
+            ${adminPreviewOpenId === item.id ? 'Свернуть' : 'Просмотр'}
+          </button>
           <button class="btn-small btn-danger" onclick="adminDeleteDocument(${item.id}, '${encodeURIComponent(String(item.filename || ''))}')">Удалить</button>
         </div>
+        <div id="admin-document-preview-${item.id}" class="doc-viewer ${adminPreviewOpenId === item.id ? '' : 'hidden'}"></div>
       </div>
-    `).join('') + '<div id="admin-document-preview" class="doc-viewer"></div>';
+    `).join('');
+
+    if (adminPreviewOpenId !== null) {
+      const stillExists = docs.some((d) => Number(d.id) === Number(adminPreviewOpenId));
+      if (stillExists) {
+        await previewDocumentContent(adminPreviewOpenId, `admin-document-preview-${adminPreviewOpenId}`);
+      } else {
+        adminPreviewOpenId = null;
+      }
+    }
   } catch (err) {
     const listEl = document.getElementById('admin-documents-list');
     if (listEl) listEl.innerHTML = `<p class="summary-text">Ошибка: ${escapeHtml(err.message)}</p>`;
   }
+}
+
+async function toggleAdminDocumentPreview(documentId) {
+  const panelId = `admin-document-preview-${documentId}`;
+  const btn = document.getElementById(`admin-preview-btn-${documentId}`);
+  const panel = document.getElementById(panelId);
+  if (!panel || !btn) return;
+
+  if (adminPreviewOpenId === documentId) {
+    panel.classList.add('hidden');
+    panel.innerHTML = '';
+    btn.textContent = 'Просмотр';
+    adminPreviewOpenId = null;
+    return;
+  }
+
+  if (adminPreviewOpenId !== null) {
+    const prevBtn = document.getElementById(`admin-preview-btn-${adminPreviewOpenId}`);
+    const prevPanel = document.getElementById(`admin-document-preview-${adminPreviewOpenId}`);
+    if (prevBtn) prevBtn.textContent = 'Просмотр';
+    if (prevPanel) {
+      prevPanel.classList.add('hidden');
+      prevPanel.innerHTML = '';
+    }
+  }
+
+  adminPreviewOpenId = documentId;
+  btn.textContent = 'Свернуть';
+  panel.classList.remove('hidden');
+  await previewDocumentContent(documentId, panelId);
 }
 
 async function adminDeleteDocument(documentId, encodedFilename = '') {
@@ -333,13 +385,19 @@ async function loadAdminKnowledge() {
   try {
     clearKnowledgeFormErrors();
     const activeQuery = knowledgeActiveOnly ? '&active_only=true' : '';
+    const candidateSourceQuery = knowledgeCandidateSourceFilter !== 'all'
+      ? `&source_ref_id=${encodeURIComponent(knowledgeCandidateSourceFilter)}`
+      : '';
+    const candidatesListEl = document.getElementById('knowledge-candidates-list');
+    const candidateScrollTop = candidatesListEl ? candidatesListEl.scrollTop : 0;
     const [overview, sources, glossary, rules, audit] = await Promise.all([
       apiGet('/api/admin/knowledge/overview'),
-      apiGet(`/api/admin/knowledge/sources?limit=200${activeQuery}`),
+      apiGet('/api/admin/knowledge/sources?limit=200&active_only=true'),
       apiGet(`/api/admin/knowledge/glossary?limit=200${activeQuery}`),
       apiGet(`/api/admin/knowledge/rules?limit=200${activeQuery}`),
       apiGet('/api/admin/audit-logs?limit=120')
     ]);
+    const candidates = await apiGet(`/api/admin/knowledge/import-candidates?status=pending&limit=500${candidateSourceQuery}`);
 
     const filterBtn = document.getElementById('knowledge-filter-active-btn');
     if (filterBtn) filterBtn.textContent = `Только активные: ${knowledgeActiveOnly ? 'да' : 'нет'}`;
@@ -352,6 +410,13 @@ async function loadAdminKnowledge() {
     if (glossaryCountEl) glossaryCountEl.textContent = String(overview.glossary_terms_count ?? 0);
     if (rulesCountEl) rulesCountEl.textContent = String(overview.rule_patterns_count ?? 0);
     if (activeRulesCountEl) activeRulesCountEl.textContent = String(overview.active_rule_patterns_count ?? 0);
+
+    const sourceTermCount = {};
+    (glossary || []).forEach((item) => {
+      const sid = Number(item?.source_ref_id || 0);
+      if (!sid) return;
+      sourceTermCount[sid] = (sourceTermCount[sid] || 0) + 1;
+    });
 
     const sourcesListEl = document.getElementById('knowledge-sources-list');
     if (sourcesListEl) {
@@ -367,11 +432,13 @@ async function loadAdminKnowledge() {
             </div>
           </div>
           <div class="knowledge-sub">Раздел: ${escapeHtml(item.section || '—')}</div>
+          <div class="knowledge-sub">Терминов: ${sourceTermCount[Number(item.id)] || 0}</div>
           <div class="inline-actions">
             <button class="btn-small" onclick="editKnowledgeSource(${item.id})">Изменить</button>
             ${item.is_active
               ? `<button class="btn-small btn-danger" onclick="setKnowledgeSourceActive(${item.id}, false)">Выкл</button>`
               : `<button class="btn-small" onclick="setKnowledgeSourceActive(${item.id}, true)">Вкл</button>`}
+            <button class="btn-small btn-danger" onclick="deleteKnowledgeSourcePermanent(${item.id}, '${encodeURIComponent(String(item.title || ''))}')">Удалить</button>
           </div>
         </div>
       `).join('') || '<p class="summary-text">Источники пока пусты.</p>';
@@ -379,7 +446,22 @@ async function loadAdminKnowledge() {
 
     const glossaryListEl = document.getElementById('knowledge-glossary-list');
     if (glossaryListEl) {
-      glossaryListEl.innerHTML = (glossary || []).map(item => `
+      const filteredGlossary = (glossary || []).filter((item) => {
+        const sourceMatch = knowledgeGlossarySourceFilter === 'all'
+          || String(item?.source_ref_id || '') === String(knowledgeGlossarySourceFilter);
+        if (!sourceMatch) return false;
+        const q = knowledgeGlossarySearch.trim().toLowerCase();
+        if (!q) return true;
+        const hay = [
+          String(item?.term || ''),
+          String(item?.canonical_definition || ''),
+          String(item?.source_ref_title || ''),
+          String(item?.id || ''),
+        ].join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+
+      glossaryListEl.innerHTML = filteredGlossary.map(item => `
         <div class="admin-list-item ${item.is_active ? '' : 'item-inactive'}">
           <div class="knowledge-row">
             <div>
@@ -401,7 +483,12 @@ async function loadAdminKnowledge() {
               : `<button class="btn-small" onclick="setKnowledgeTermActive(${item.id}, true)">Вкл</button>`}
           </div>
         </div>
-      `).join('') || '<p class="summary-text">Термины пока пусты.</p>';
+      `).join('') || '<p class="summary-text">По выбранным фильтрам записей нет.</p>';
+
+      const statEl = document.getElementById('knowledge-glossary-filter-stats');
+      if (statEl) {
+        statEl.textContent = `Показано ${filteredGlossary.length} из ${(glossary || []).length}`;
+      }
     }
 
     const rulesListEl = document.getElementById('knowledge-rules-list');
@@ -422,21 +509,38 @@ async function loadAdminKnowledge() {
           <div class="knowledge-sub"><code>${escapeHtml(item.pattern)}</code></div>
           <div class="knowledge-sub">${escapeHtml(item.description || 'Без описания')}</div>
           <div class="knowledge-sub">Источник: ${escapeHtml(item.source_ref_title || '—')}</div>
-          <div class="inline-actions">
-            <button class="btn-small" onclick="editKnowledgeRule(${item.id})">Изменить</button>
-            ${item.is_active
-              ? `<button class="btn-small btn-danger" onclick="setKnowledgeRuleActive(${item.id}, false)">Выкл</button>`
-              : `<button class="btn-small" onclick="setKnowledgeRuleActive(${item.id}, true)">Вкл</button>`}
-          </div>
         </div>
       `).join('') || '<p class="summary-text">Правила пока пусты.</p>';
+    }
+
+    if (candidatesListEl) {
+      candidatesListEl.innerHTML = (candidates || []).map(item => `
+        <div class="admin-list-item">
+          <div class="knowledge-row">
+            <div>
+              <div><strong>${escapeHtml(item.term)}</strong></div>
+              <div class="knowledge-sub">ID ${item.id} | Источник: ${escapeHtml(item.source_ref_title || '—')}</div>
+            </div>
+            <div class="knowledge-meta">
+              <span class="knowledge-pill">${escapeHtml(item.confidence || 'medium')}</span>
+              <span class="knowledge-pill">${escapeHtml(item.status || 'pending')}</span>
+            </div>
+          </div>
+          <div class="knowledge-sub">${escapeHtml(item.canonical_definition || '')}</div>
+          <div class="inline-actions">
+            <button class="btn-small" onclick="approveCandidate(${item.id})">Принять</button>
+            <button class="btn-small btn-danger" onclick="rejectCandidate(${item.id})">Отклонить</button>
+          </div>
+        </div>
+      `).join('') || '<p class="summary-text">Pending-кандидатов нет.</p>';
+      candidatesListEl.scrollTop = candidateScrollTop;
     }
 
     knowledgeStore.sources = Array.isArray(sources) ? sources : [];
     knowledgeStore.glossary = Array.isArray(glossary) ? glossary : [];
     knowledgeStore.rules = Array.isArray(rules) ? rules : [];
     renderSourceSelect(document.getElementById('knowledge-term-source-id'), knowledgeStore.sources);
-    renderSourceSelect(document.getElementById('knowledge-rule-source-id'), knowledgeStore.sources);
+    bindKnowledgeFilterControls();
 
     bindKnowledgeForms();
     setupKnowledgeTestInputAutoResize();
@@ -541,38 +645,118 @@ function bindKnowledgeForms() {
     };
   }
 
-  const ruleForm = document.getElementById('knowledge-rule-form');
-  if (ruleForm) {
-    ruleForm.onsubmit = async (e) => {
-      e.preventDefault();
-      clearKnowledgeFormErrors();
-      const name = document.getElementById('knowledge-rule-name')?.value.trim();
-      const pattern = document.getElementById('knowledge-rule-pattern')?.value;
-      const description = document.getElementById('knowledge-rule-description')?.value.trim();
-      const suggestion = document.getElementById('knowledge-rule-suggestion')?.value.trim();
-      const severity = document.getElementById('knowledge-rule-severity')?.value || 'medium';
-      const sourceRefIdRaw = document.getElementById('knowledge-rule-source-id')?.value || '';
-      if (!name || !pattern) {
-        setInlineError('knowledge-rule-error', 'Название и pattern обязательны.');
-        return;
-      }
-      try {
-        await apiPost('/api/admin/knowledge/rules', {
-          name,
-          rule_type: 'regex',
-          pattern,
-          description: description || null,
-          suggestion_template: suggestion || null,
-          severity,
-          source_ref_id: sourceRefIdRaw ? Number(sourceRefIdRaw) : null
-        });
-        ruleForm.reset();
-        renderSourceSelect(document.getElementById('knowledge-rule-source-id'), knowledgeStore.sources);
-        await loadAdminKnowledge();
-      } catch (err) {
-        setInlineError('knowledge-rule-error', err.message || 'Ошибка добавления правила');
-      }
+}
+
+function bindKnowledgeFilterControls() {
+  const searchEl = document.getElementById('knowledge-glossary-search');
+  const sourceFilterEl = document.getElementById('knowledge-glossary-source-filter');
+
+  if (sourceFilterEl) {
+    const options = ['<option value="all">Все источники</option>']
+      .concat((knowledgeStore.sources || []).map((s) => {
+        const selected = String(knowledgeGlossarySourceFilter) === String(s.id) ? ' selected' : '';
+        return `<option value="${s.id}"${selected}>${escapeHtml(s.title || `Источник ${s.id}`)}</option>`;
+      }));
+    sourceFilterEl.innerHTML = options.join('');
+    sourceFilterEl.value = knowledgeGlossarySourceFilter;
+    if (!sourceFilterEl.dataset.bound) {
+      sourceFilterEl.addEventListener('change', () => {
+        knowledgeGlossarySourceFilter = sourceFilterEl.value || 'all';
+        loadAdminKnowledge();
+      });
+      sourceFilterEl.dataset.bound = '1';
+    }
+  }
+
+  if (searchEl) {
+    searchEl.value = knowledgeGlossarySearch;
+    if (!searchEl.dataset.bound) {
+      searchEl.addEventListener('input', () => {
+        knowledgeGlossarySearch = String(searchEl.value || '');
+        loadAdminKnowledge();
+      });
+      searchEl.dataset.bound = '1';
+    }
+  }
+
+  const candidateSourceFilterEl = document.getElementById('knowledge-candidates-source-filter');
+  if (candidateSourceFilterEl) {
+    const options = ['<option value="all">Все источники</option>']
+      .concat((knowledgeStore.sources || []).map((s) => {
+        const selected = String(knowledgeCandidateSourceFilter) === String(s.id) ? ' selected' : '';
+        return `<option value="${s.id}"${selected}>${escapeHtml(s.title || `Источник ${s.id}`)}</option>`;
+      }));
+    candidateSourceFilterEl.innerHTML = options.join('');
+    candidateSourceFilterEl.value = knowledgeCandidateSourceFilter;
+    if (!candidateSourceFilterEl.dataset.bound) {
+      candidateSourceFilterEl.addEventListener('change', () => {
+        knowledgeCandidateSourceFilter = candidateSourceFilterEl.value || 'all';
+        loadAdminKnowledge();
+      });
+      candidateSourceFilterEl.dataset.bound = '1';
+    }
+  }
+}
+
+async function approveCandidate(candidateId) {
+  try {
+    const contentEl = document.querySelector('.content');
+    const keepScroll = contentEl ? contentEl.scrollTop : 0;
+    await apiPost('/api/admin/knowledge/import-candidates/approve', {
+      candidate_ids: [Number(candidateId)],
+      apply_to_all_pending: false
+    });
+    await loadAdminKnowledge();
+    if (contentEl) contentEl.scrollTop = keepScroll;
+  } catch (err) {
+    alert(err.message || 'Ошибка подтверждения кандидата');
+  }
+}
+
+async function rejectCandidate(candidateId) {
+  try {
+    const contentEl = document.querySelector('.content');
+    const keepScroll = contentEl ? contentEl.scrollTop : 0;
+    await apiPost('/api/admin/knowledge/import-candidates/reject', {
+      candidate_ids: [Number(candidateId)],
+      apply_to_all_pending: false
+    });
+    await loadAdminKnowledge();
+    if (contentEl) contentEl.scrollTop = keepScroll;
+  } catch (err) {
+    alert(err.message || 'Ошибка отклонения кандидата');
+  }
+}
+
+async function approveAllPendingCandidates() {
+  if (!confirm('Подтвердить все pending-кандидаты по выбранному фильтру источника?')) return;
+  try {
+    const payload = {
+      apply_to_all_pending: true,
+      source_ref_id: knowledgeCandidateSourceFilter === 'all' ? null : Number(knowledgeCandidateSourceFilter),
+      candidate_ids: []
     };
+    const result = await apiPost('/api/admin/knowledge/import-candidates/approve', payload);
+    alert(`Подтверждено: ${Number(result?.approved || 0)}`);
+    await loadAdminKnowledge();
+  } catch (err) {
+    alert(err.message || 'Ошибка массового подтверждения');
+  }
+}
+
+async function rejectAllPendingCandidates() {
+  if (!confirm('Отклонить все pending-кандидаты по выбранному фильтру источника?')) return;
+  try {
+    const payload = {
+      apply_to_all_pending: true,
+      source_ref_id: knowledgeCandidateSourceFilter === 'all' ? null : Number(knowledgeCandidateSourceFilter),
+      candidate_ids: []
+    };
+    const result = await apiPost('/api/admin/knowledge/import-candidates/reject', payload);
+    alert(`Отклонено: ${Number(result?.rejected || 0)}`);
+    await loadAdminKnowledge();
+  } catch (err) {
+    alert(err.message || 'Ошибка массового отклонения');
   }
 }
 
@@ -597,12 +781,18 @@ async function deactivateKnowledgeTerm(id) {
 }
 
 async function deactivateKnowledgeRule(id) {
-  if (!confirm(`Деактивировать правило #${id}?`)) return;
+  alert('Встроенные regex-правила недоступны для деактивации.');
+}
+
+async function deleteKnowledgeSourcePermanent(id, encodedTitle = '') {
+  const title = safeDecodeURIComponent(encodedTitle);
+  if (!confirm(`Удалить источник "${title || id}" безвозвратно вместе с его терминами?`)) return;
   try {
-    await apiDelete(`/api/admin/knowledge/rules/${id}`);
+    const result = await apiDelete(`/api/admin/knowledge/sources/${id}/permanent`);
+    alert(`Источник удален. Терминов удалено: ${Number(result?.glossary_deleted || 0)}.`);
     await loadAdminKnowledge();
   } catch (err) {
-    alert(err.message || 'Ошибка деактивации правила');
+    alert(err.message || 'Ошибка удаления источника');
   }
 }
 
@@ -625,12 +815,7 @@ async function setKnowledgeTermActive(id, isActive) {
 }
 
 async function setKnowledgeRuleActive(id, isActive) {
-  try {
-    await apiPatch(`/api/admin/knowledge/rules/${id}`, { is_active: isActive });
-    await loadAdminKnowledge();
-  } catch (err) {
-    alert(err.message || 'Ошибка изменения статуса правила');
-  }
+  alert('Встроенные regex-правила недоступны для изменения.');
 }
 
 function toggleKnowledgeActiveFilter() {
@@ -806,38 +991,7 @@ async function editKnowledgeTerm(id) {
 }
 
 async function editKnowledgeRule(id) {
-  const item = knowledgeStore.rules.find(x => Number(x.id) === Number(id));
-  if (!item) return;
-  openKnowledgeEditModal({
-    title: `Правило #${id}`,
-    fields: [
-      { key: 'name', placeholder: 'Название правила', value: item.name || '' },
-      { key: 'pattern', placeholder: 'Regex pattern', value: item.pattern || '' },
-      { key: 'description', placeholder: 'Описание', value: item.description || '' },
-      { key: 'suggestion_template', placeholder: 'Подсказка исправления', value: item.suggestion_template || '' },
-      {
-        key: 'source_ref_id',
-        type: 'select',
-        value: item.source_ref_id ? String(item.source_ref_id) : '',
-        options: [''].concat(knowledgeStore.sources.map(s => String(s.id))),
-        allowCustom: false,
-        optionLabels: (value) => {
-          if (!value) return 'Источник: не выбран';
-          const source = knowledgeStore.sources.find(s => String(s.id) === String(value));
-          return source ? `${source.title} (${source.reference_code || 'без кода'})` : value;
-        }
-      },
-      { key: 'severity', type: 'select', value: item.severity || 'medium', options: ['low', 'medium', 'high', 'critical'] }
-    ],
-    onSubmit: async (raw) => apiPatch(`/api/admin/knowledge/rules/${id}`, {
-      name: String(raw.name || '').trim(),
-      pattern: String(raw.pattern || ''),
-      description: String(raw.description || '').trim() || null,
-      suggestion_template: String(raw.suggestion_template || '').trim() || null,
-      source_ref_id: String(raw.source_ref_id || '').trim() ? Number(raw.source_ref_id) : null,
-      severity: String(raw.severity || 'medium').trim()
-    })
-  });
+  alert('Встроенные regex-правила недоступны для редактирования.');
 }
 
 async function runKnowledgeSmokeTest() {
@@ -897,3 +1051,9 @@ window.closeKnowledgeEditModal = closeKnowledgeEditModal;
 window.createKnowledgeSnapshot = createKnowledgeSnapshot;
 window.loadKnowledgeSnapshots = loadKnowledgeSnapshots;
 window.restoreKnowledgeSnapshot = restoreKnowledgeSnapshot;
+window.toggleAdminDocumentPreview = toggleAdminDocumentPreview;
+window.deleteKnowledgeSourcePermanent = deleteKnowledgeSourcePermanent;
+window.approveCandidate = approveCandidate;
+window.rejectCandidate = rejectCandidate;
+window.approveAllPendingCandidates = approveAllPendingCandidates;
+window.rejectAllPendingCandidates = rejectAllPendingCandidates;

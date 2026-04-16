@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.models.document_record import DocumentChunk, DocumentRecord
 from app.models.user import User
 from app.services.audit_service import log_event
+from app.services.definition_extractor import stage_definitions_from_training_document
 from app.utils.auth import get_current_active_user
 from app.utils.text_processor import (
     build_chunk_rows,
@@ -107,13 +108,29 @@ async def upload_document(
         chunk_count_existing = await db.scalar(
             select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_file.id)
         )
+        training_ingest_stats: dict | None = None
+        if purpose == "training":
+            try:
+                training_ingest_stats = await stage_definitions_from_training_document(
+                    db,
+                    document_id=same_file.id,
+                    filename=same_file.filename,
+                    text=str(same_file.extracted_text or ""),
+                )
+            except Exception as exc:
+                training_ingest_stats = {"error": str(exc)}
         await log_event(
             db,
             action="document_upload_reused_file_hash",
             user_id=current_user.id,
             resource_type="document",
             resource_id=str(same_file.id),
-            metadata={"filename": file.filename, "purpose": purpose, "file_hash": file_hash},
+            metadata={
+                "filename": file.filename,
+                "purpose": purpose,
+                "file_hash": file_hash,
+                "training_ingest": training_ingest_stats,
+            },
             ip_address=request.client.host if request and request.client else None,
         )
         await db.commit()
@@ -151,13 +168,29 @@ async def upload_document(
         chunk_count_existing = await db.scalar(
             select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == same_text.id)
         )
+        training_ingest_stats: dict | None = None
+        if purpose == "training":
+            try:
+                training_ingest_stats = await stage_definitions_from_training_document(
+                    db,
+                    document_id=same_text.id,
+                    filename=same_text.filename,
+                    text=str(same_text.extracted_text or ""),
+                )
+            except Exception as exc:
+                training_ingest_stats = {"error": str(exc)}
         await log_event(
             db,
             action="document_upload_reused_text_hash",
             user_id=current_user.id,
             resource_type="document",
             resource_id=str(same_text.id),
-            metadata={"filename": file.filename, "purpose": purpose, "text_hash": text_hash},
+            metadata={
+                "filename": file.filename,
+                "purpose": purpose,
+                "text_hash": text_hash,
+                "training_ingest": training_ingest_stats,
+            },
             ip_address=request.client.host if request and request.client else None,
         )
         await db.commit()
@@ -204,6 +237,18 @@ async def upload_document(
             )
         )
 
+    training_ingest_stats: dict | None = None
+    if purpose == "training":
+        try:
+            training_ingest_stats = await stage_definitions_from_training_document(
+                db,
+                document_id=document.id,
+                filename=document.filename,
+                text=extracted_text,
+            )
+        except Exception as exc:
+            training_ingest_stats = {"error": str(exc)}
+
     await log_event(
         db,
         action="document_upload",
@@ -219,6 +264,7 @@ async def upload_document(
             "file_hash": document.file_hash,
             "text_hash": document.text_hash,
             "chunk_count": len(chunk_rows),
+            "training_ingest": training_ingest_stats,
         },
         ip_address=request.client.host if request and request.client else None,
     )

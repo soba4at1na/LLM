@@ -546,6 +546,24 @@ async def _analyze_with_llm(text: str) -> AnalyzeResponse:
             document_id=0,
             analysis_id=0,
         )
+        # Guard against malformed/partial LLM JSON where scores become zero.
+        if (
+            candidate.readability_score <= 0
+            or candidate.grammar_score <= 0
+            or candidate.structure_score <= 0
+        ):
+            heuristic = _heuristic_analysis(text)
+            if candidate.readability_score <= 0:
+                candidate.readability_score = heuristic.readability_score
+            if candidate.grammar_score <= 0:
+                candidate.grammar_score = heuristic.grammar_score
+            if candidate.structure_score <= 0:
+                candidate.structure_score = heuristic.structure_score
+        if candidate.overall_score <= 0:
+            candidate.overall_score = int(
+                (candidate.readability_score + candidate.grammar_score + candidate.structure_score) / 3
+            )
+
         if _looks_placeholder_analysis(candidate):
             return _heuristic_analysis(text)
         return candidate
@@ -708,14 +726,29 @@ def _sanitize_auto_replacement(fragment: str, replacement: str | None) -> str | 
     if "\n" in frag or "\n" in repl:
         return None
 
-    # Allow auto-apply only for short local edits (typos/dates), not sentence rewrites.
+    # Reject generic instruction-like texts; allow full sentence replacements.
+    repl_l = repl.lower()
+    generic_prefixes = (
+        "уточн",
+        "проверь",
+        "добав",
+        "удал",
+        "исправ",
+        "используй",
+        "используйте",
+        "сократ",
+        "переформ",
+        "замени",
+        "замените",
+        "провед",
+    )
+    if any(repl_l.startswith(prefix) for prefix in generic_prefixes):
+        return None
+    if len(repl) > 500 or len(frag) > 500:
+        return None
     frag_words = len(re.findall(r"\w+", frag, flags=re.UNICODE))
     repl_words = len(re.findall(r"\w+", repl, flags=re.UNICODE))
-    if len(frag) > 80 or len(repl) > 80:
-        return None
     if frag_words == 0 or repl_words == 0:
-        return None
-    if frag_words > 4 or repl_words > 4:
         return None
     return repl
 
@@ -1009,13 +1042,17 @@ def _normalize_analysis_for_render(result: AnalyzeResponse, text: str) -> Analyz
     for item in (result.issue_details or []):
         if not isinstance(item, dict):
             continue
-        fragment = _compact_fragment_for_highlight(text, str(item.get("fragment", "")))
+        original_fragment = str(item.get("fragment", "")).strip()
+        replacement = _sanitize_auto_replacement(original_fragment, item.get("replacement"))
+        fragment = original_fragment
+        if not replacement:
+            fragment = _compact_fragment_for_highlight(text, original_fragment)
         suggestion = str(item.get("suggestion", "")).strip()
         if not fragment or not suggestion:
             continue
         normalized = dict(item)
         normalized["fragment"] = fragment
-        normalized["replacement"] = _sanitize_auto_replacement(fragment, item.get("replacement"))
+        normalized["replacement"] = replacement
         normalized_details.append(normalized)
 
     return AnalyzeResponse(
@@ -1154,11 +1191,11 @@ def _run_builtin_quality_checks(text: str, max_findings: int = 24) -> dict:
             fragment = expand_to_token_bounds(idx, len(bad))
             replacement = build_token_replacement(fragment, bad, good)
             issues.append(f"Орфографическая ошибка: «{bad}».")
-            recommendations.append(f"Проверьте правописание и используйте форму, близкую к «{good}...».")
+            recommendations.append(f"Исправьте на: «{replacement}».")
             details.append(
                 {
                     "fragment": fragment,
-                    "suggestion": good,
+                    "suggestion": replacement,
                     "replacement": replacement,
                     "reason": "Обнаружено слово с высокой вероятностью орфографической ошибки.",
                     "confidence": "high",

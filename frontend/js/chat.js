@@ -7,6 +7,11 @@ const CHAT_INPUT_MAX_HEIGHT = 220;
 let chatsCache = [];
 let chatInitPromise = null;
 let historyLoadToken = 0;
+let isChatSending = false;
+let pendingChatPollTimer = null;
+
+const CHAT_ACTIVE_KEY = 'llm_active_chat_id';
+const CHAT_PENDING_KEY = 'llm_pending_chat_v1';
 
 function getContentScrollContainer() {
   return document.querySelector('.content');
@@ -19,6 +24,63 @@ function escapeHtml(text) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function saveActiveChatId(chatId) {
+  try {
+    if (!chatId) {
+      localStorage.removeItem(CHAT_ACTIVE_KEY);
+      return;
+    }
+    localStorage.setItem(CHAT_ACTIVE_KEY, String(chatId));
+  } catch (_) {}
+}
+
+function loadSavedActiveChatId() {
+  try {
+    const raw = localStorage.getItem(CHAT_ACTIVE_KEY);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function savePendingChatState(payload) {
+  try {
+    localStorage.setItem(CHAT_PENDING_KEY, JSON.stringify(payload || {}));
+  } catch (_) {}
+}
+
+function getPendingChatState() {
+  try {
+    const raw = localStorage.getItem(CHAT_PENDING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.chat_id || !parsed.sent_at) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearPendingChatState() {
+  try {
+    localStorage.removeItem(CHAT_PENDING_KEY);
+  } catch (_) {}
+  if (pendingChatPollTimer) {
+    clearTimeout(pendingChatPollTimer);
+    pendingChatPollTimer = null;
+  }
+}
+
+function setChatSendingState(isSending) {
+  isChatSending = Boolean(isSending);
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.querySelector('#chat-dock .chat-send-btn');
+  if (input) input.disabled = isChatSending;
+  if (sendBtn) sendBtn.disabled = isChatSending;
 }
 
 function scrollChatToBottom(smooth = true) {
@@ -98,8 +160,16 @@ function updateChatTopbarTitle() {
 async function loadChats({ selectLatest = false } = {}) {
   const chats = await apiWithAuth('/api/chats');
   chatsCache = Array.isArray(chats) ? chats : [];
+  if (!activeChatId) {
+    const saved = loadSavedActiveChatId();
+    if (saved) activeChatId = saved;
+  }
+  if (activeChatId && !chats.some((c) => Number(c.id) === Number(activeChatId))) {
+    activeChatId = null;
+  }
   if (!activeChatId && chats.length) activeChatId = chats[0].id;
   if (selectLatest && chats.length) activeChatId = chats[0].id;
+  saveActiveChatId(activeChatId);
   renderChatsList(chats);
   updateChatTopbarTitle();
   return chats;
@@ -127,12 +197,15 @@ async function loadChatHistory(chatId) {
 
 async function openChat(chatId) {
   activeChatId = chatId;
+  saveActiveChatId(activeChatId);
   const chats = await loadChats();
   const exists = chats.some((x) => x.id === chatId);
   if (!exists && chats.length) activeChatId = chats[0].id;
+  saveActiveChatId(activeChatId);
   await loadChatHistory(activeChatId);
   navTo('chat');
   updateChatTopbarTitle();
+  maybeResumePendingChatResponse();
 }
 
 async function createNewChat() {
@@ -141,10 +214,12 @@ async function createNewChat() {
     body: JSON.stringify({ title: 'Новый чат' })
   });
   activeChatId = created.id;
+  saveActiveChatId(activeChatId);
   await loadChats();
   await loadChatHistory(activeChatId);
   navTo('chat');
   updateChatTopbarTitle();
+  maybeResumePendingChatResponse();
 }
 
 async function renameChat(chatId) {
@@ -162,6 +237,7 @@ async function deleteChat(chatId) {
   if (!confirm('Удалить этот чат?')) return;
   await apiWithAuth(`/api/chats/${chatId}`, { method: 'DELETE' });
   if (activeChatId === chatId) activeChatId = null;
+  saveActiveChatId(activeChatId);
   const chats = await loadChats({ selectLatest: true });
   if (chats.length) await loadChatHistory(chats[0].id);
   else {
@@ -169,6 +245,7 @@ async function deleteChat(chatId) {
     if (container) container.innerHTML = '';
   }
   updateChatTopbarTitle();
+  maybeResumePendingChatResponse();
 }
 
 function toggleChatContextMenu(chatId, event) {
@@ -209,6 +286,7 @@ function autoResizeChatInput(inputEl) {
 }
 
 async function sendChatMessage() {
+  if (isChatSending) return;
   const input = document.getElementById('chat-input');
   const messageText = input ? input.value.trim() : '';
   if (!messageText) return;
@@ -219,6 +297,7 @@ async function sendChatMessage() {
       body: JSON.stringify({ title: messageText.slice(0, 60) || 'Новый чат' })
     });
     activeChatId = created.id;
+    saveActiveChatId(activeChatId);
     await loadChats();
     updateChatTopbarTitle();
   }
@@ -228,6 +307,11 @@ async function sendChatMessage() {
   autoResizeChatInput(input);
   scrollChatToBottom();
   showLoading('Модель думает...');
+  setChatSendingState(true);
+  savePendingChatState({
+    chat_id: activeChatId,
+    sent_at: new Date().toISOString()
+  });
 
   try {
     const data = await apiWithAuth('/api/chat', {
@@ -237,17 +321,21 @@ async function sendChatMessage() {
 
     if (data.chat_id && data.chat_id !== activeChatId) {
       activeChatId = data.chat_id;
+      saveActiveChatId(activeChatId);
     }
     const suffix = data.context_used ? '\n\n(Использован контекст из ваших документов)' : '';
     addChatMessage('assistant', (data.response || 'Нет ответа от модели') + suffix);
     scrollChatToBottom();
     await loadChats();
     updateChatTopbarTitle();
+    clearPendingChatState();
   } catch (err) {
     console.error('Chat error:', err);
     addChatMessage('assistant', 'Ошибка связи с моделью. Попробуйте позже.');
     scrollChatToBottom();
+    maybeResumePendingChatResponse();
   } finally {
+    setChatSendingState(false);
     hideLoading();
   }
 }
@@ -260,14 +348,67 @@ async function initializeChats() {
       body: JSON.stringify({ title: 'Новый чат' })
     });
     activeChatId = created.id;
+    saveActiveChatId(activeChatId);
     await loadChats();
   }
   if (!activeChatId) {
     const refreshed = await loadChats({ selectLatest: true });
     if (refreshed.length) activeChatId = refreshed[0].id;
   }
+  saveActiveChatId(activeChatId);
   if (activeChatId) await loadChatHistory(activeChatId);
   updateChatTopbarTitle();
+}
+
+function maybeResumePendingChatResponse() {
+  if (pendingChatPollTimer) return;
+  const pending = getPendingChatState();
+  if (!pending) return;
+  if (!activeChatId || Number(pending.chat_id) !== Number(activeChatId)) return;
+
+  const sentAtMs = Date.parse(String(pending.sent_at || ''));
+  if (!Number.isFinite(sentAtMs)) {
+    clearPendingChatState();
+    return;
+  }
+
+  const timeoutMs = 8 * 60 * 1000;
+  const startedMs = Date.now();
+  setChatSendingState(true);
+
+  const tick = async () => {
+    try {
+      const items = await apiWithAuth(`/api/chat/history?chat_id=${activeChatId}&limit=80`);
+      const hasAssistantAfterPending = (Array.isArray(items) ? items : []).some((item) => {
+        if (String(item?.role) === 'user') return false;
+        const createdMs = Date.parse(String(item?.created_at || ''));
+        return Number.isFinite(createdMs) && createdMs >= sentAtMs - 1500;
+      });
+
+      if (hasAssistantAfterPending) {
+        await loadChatHistory(activeChatId);
+        clearPendingChatState();
+        setChatSendingState(false);
+        return;
+      }
+
+      if (Date.now() - startedMs >= timeoutMs) {
+        clearPendingChatState();
+        setChatSendingState(false);
+        return;
+      }
+      pendingChatPollTimer = setTimeout(tick, 2500);
+    } catch (_) {
+      if (Date.now() - startedMs >= timeoutMs) {
+        clearPendingChatState();
+        setChatSendingState(false);
+        return;
+      }
+      pendingChatPollTimer = setTimeout(tick, 3500);
+    }
+  };
+
+  pendingChatPollTimer = setTimeout(tick, 1200);
 }
 
 async function ensureChatsInitialized() {
@@ -298,7 +439,12 @@ function setupChat() {
     scroller.removeEventListener('scroll', updateScrollDownButton);
     scroller.addEventListener('scroll', updateScrollDownButton);
   }
-  ensureChatsInitialized().then(() => updateScrollDownButton()).catch((e) => console.warn(e));
+  ensureChatsInitialized()
+    .then(() => {
+      updateScrollDownButton();
+      maybeResumePendingChatResponse();
+    })
+    .catch((e) => console.warn(e));
 
   if (!chatGlobalEventsBound) {
     document.addEventListener('click', () => {

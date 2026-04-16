@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     
     DATABASE_URL: str
     
-    MODEL_PATH: str = "/app/models/model.gguf"
+    MODEL_PATH: str = ""
+    MODEL_DIR: str = "/app/models"
+    MODEL_AUTO_SELECT: bool = True
     MODEL_N_CTX: int = 8192
     MODEL_TEMPERATURE: float = 0.1
     MODEL_MAX_TOKENS: int = 700

@@ -192,7 +192,7 @@ const pages = {
                   <h4>💡 Рекомендации</h4>
                   <ul id="recommendations-list" class="recommendations-list"></ul>
                 </div>
-                
+
                 <div class="results-section">
                   <h4>📝 Краткое резюме</h4>
                   <p id="summary-text" class="summary-text"></p>
@@ -200,7 +200,13 @@ const pages = {
                 </div>
 
                 <div class="results-section">
-                  <h4>📄 Просмотр документа</h4>
+                  <div class="results-section-head">
+                    <h4>📄 Просмотр документа</h4>
+                    <div class="results-header-actions">
+                      <button class="btn-small" onclick="applyAllFixes()">Применить все</button>
+                      <button class="btn-small" onclick="undoAllFixes()">Отменить все</button>
+                    </div>
+                  </div>
                   <div id="analyzed-document-viewer" class="doc-viewer"></div>
                 </div>
             </div>
@@ -274,7 +280,7 @@ const pages = {
             </div>
           </div>
 
-          <div id="view-admin-knowledge" class="view hidden">
+          <div id="view-admin-knowledge" class="view hidden knowledge-view">
             <div class="results-section">
               <h4>🧠 База знаний</h4>
               <div class="check-actions">
@@ -298,21 +304,21 @@ const pages = {
               </div>
             </div>
 
-            <div class="admin-grid">
+            <div class="admin-grid knowledge-grid">
               <div class="results-section">
-                <h4>Источники</h4>
-                <form id="knowledge-source-form" class="form-stack">
-                  <input id="knowledge-source-title" type="text" placeholder="Название источника" required>
-                  <input id="knowledge-source-code" type="text" placeholder="Код (например CORP-IT-SEC-001)" pattern="[A-Za-z0-9][A-Za-z0-9._-]{1,63}" title="2-64 символа: латиница, цифры, . _ -">
-                  <input id="knowledge-source-section" type="text" placeholder="Раздел (необязательно)">
-                  <button class="btn-small" type="submit">Добавить источник</button>
-                  <div id="knowledge-source-error" class="form-error hidden"></div>
-                </form>
+                <h4>Источники (активные)</h4>
                 <div id="knowledge-sources-list" class="admin-list knowledge-list-scroll"></div>
               </div>
 
               <div class="results-section">
                 <h4>Термины глоссария</h4>
+                <div class="knowledge-toolbar">
+                  <input id="knowledge-glossary-search" type="text" placeholder="Поиск по термину/определению/источнику">
+                  <select id="knowledge-glossary-source-filter">
+                    <option value="all">Все источники</option>
+                  </select>
+                </div>
+                <div id="knowledge-glossary-filter-stats" class="summary-text">Показаны все записи</div>
                 <form id="knowledge-glossary-form" class="form-stack">
                   <input id="knowledge-term" type="text" placeholder="Термин" required>
                   <textarea id="knowledge-term-definition" rows="2" placeholder="Каноничное определение" required></textarea>
@@ -334,25 +340,22 @@ const pages = {
 
               <div class="results-section">
                 <h4>Правила</h4>
-                <form id="knowledge-rule-form" class="form-stack">
-                  <input id="knowledge-rule-name" type="text" placeholder="Название правила" required>
-                  <input id="knowledge-rule-pattern" type="text" placeholder="Regex pattern" required>
-                  <textarea id="knowledge-rule-description" rows="2" placeholder="Описание срабатывания"></textarea>
-                  <textarea id="knowledge-rule-suggestion" rows="2" placeholder="Подсказка исправления"></textarea>
-                  <select id="knowledge-rule-source-id">
-                    <option value="">Источник: не выбран</option>
-                  </select>
-                  <select id="knowledge-rule-severity">
-                    <option value="low">low</option>
-                    <option value="medium" selected>medium</option>
-                    <option value="high">high</option>
-                    <option value="critical">critical</option>
-                  </select>
-                  <button class="btn-small" type="submit">Добавить правило</button>
-                  <div id="knowledge-rule-error" class="form-error hidden"></div>
-                </form>
+                <p class="summary-text">Regex-правила встроены в систему и недоступны для редактирования из UI.</p>
                 <div id="knowledge-rules-list" class="admin-list knowledge-list-scroll"></div>
               </div>
+            </div>
+            <div class="results-section">
+              <h4>Черновик Импорта</h4>
+              <div class="knowledge-toolbar">
+                <select id="knowledge-candidates-source-filter">
+                  <option value="all">Все источники</option>
+                </select>
+                <div class="inline-actions">
+                  <button class="btn-small" onclick="approveAllPendingCandidates()">Принять Все Pending</button>
+                  <button class="btn-small btn-danger" onclick="rejectAllPendingCandidates()">Отклонить Все Pending</button>
+                </div>
+              </div>
+              <div id="knowledge-candidates-list" class="admin-list knowledge-list-scroll"></div>
             </div>
             <div class="results-section">
               <h4>Снимки Policy</h4>

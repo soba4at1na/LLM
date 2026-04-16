@@ -59,3 +59,19 @@ class KnowledgePolicySnapshot(Base):
     snapshot_json = Column(JSON, nullable=False, default=dict)
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class KnowledgeImportCandidate(Base):
+    __tablename__ = "knowledge_import_candidates"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source_ref_id = Column(BigInteger, ForeignKey("source_references.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(BigInteger, ForeignKey("documents.id", ondelete="CASCADE"), nullable=True, index=True)
+    term = Column(String(255), nullable=False, index=True)
+    normalized_term = Column(String(255), nullable=False, index=True)
+    canonical_definition = Column(Text, nullable=False)
+    confidence = Column(String(16), nullable=False, default="medium")
+    status = Column(String(16), nullable=False, default="pending")  # pending|approved|rejected
+    reviewed_by = Column(String(64), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

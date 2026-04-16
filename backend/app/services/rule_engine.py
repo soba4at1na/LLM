@@ -6,9 +6,78 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.knowledge import GlossaryTerm, RulePattern, SourceReference
+from app.models.knowledge import GlossaryTerm, SourceReference
 
 ALLOWED_SEVERITIES = {"low", "medium", "high", "critical"}
+
+BUILTIN_REGEX_RULES: list[dict[str, str]] = [
+    {
+        "id": "double-spaces",
+        "name": "Двойные пробелы",
+        "rule_type": "regex",
+        "pattern": r" {2,}",
+        "description": "Обнаружены множественные пробелы.",
+        "severity": "low",
+        "suggestion_template": "Замените множественные пробелы на один.",
+        "source_code": "CORP-IT-SEC-001",
+        "is_active": True,
+    },
+    {
+        "id": "many-exclamation",
+        "name": "Слишком много восклицательных знаков",
+        "rule_type": "regex",
+        "pattern": r"!{2,}",
+        "description": "Избыточная эмоциональная пунктуация неуместна в техническом документе.",
+        "severity": "medium",
+        "suggestion_template": "Оставьте один восклицательный знак или замените на точку.",
+        "source_code": "CORP-IT-SEC-001",
+        "is_active": True,
+    },
+    {
+        "id": "capslock-fragments",
+        "name": "Капслок-фрагменты",
+        "rule_type": "regex",
+        "pattern": r"\b[А-ЯЁ]{5,}\b",
+        "description": "Найдены слова в полном верхнем регистре.",
+        "severity": "low",
+        "suggestion_template": "Используйте стандартный регистр, если это не официальная аббревиатура.",
+        "source_code": "CORP-IT-SEC-001",
+        "is_active": True,
+    },
+]
+
+_DEFINITION_STOPWORDS = {
+    "это",
+    "как",
+    "для",
+    "при",
+    "или",
+    "также",
+    "так",
+    "что",
+    "чтобы",
+    "который",
+    "которая",
+    "которые",
+    "над",
+    "под",
+    "без",
+    "между",
+    "через",
+    "а",
+    "и",
+    "но",
+    "по",
+    "в",
+    "во",
+    "на",
+    "с",
+    "со",
+    "к",
+    "у",
+    "о",
+    "об",
+}
 
 
 def _normalize_list(raw: Any) -> list[str]:
@@ -42,17 +111,6 @@ def _source_payload(source_ref: SourceReference | None) -> dict | None:
     }
 
 
-def _build_fragment(text: str, start: int, end: int, pad: int = 50) -> str:
-    left = max(0, start - pad)
-    right = min(len(text), end + pad)
-    fragment = text[left:right].strip()
-    if left > 0:
-        fragment = "..." + fragment
-    if right < len(text):
-        fragment = fragment + "..."
-    return fragment or text[max(0, start):min(len(text), end)]
-
-
 def _build_replacement_candidate(matched_text: str, suggestion: str) -> str | None:
     match_clean = str(matched_text or "").strip()
     sugg_clean = str(suggestion or "").strip()
@@ -79,9 +137,6 @@ def _build_replacement_candidate(matched_text: str, suggestion: str) -> str | No
 
 
 def _compile_glossary_variant_pattern(phrase: str) -> str:
-    # More tolerant match for phrase variants:
-    # - keep short tokens strict (e.g., "ip")
-    # - allow small suffix drift for longer tokens (e.g., "интернет" -> "интернетю")
     tokens = [t for t in re.split(r"\s+", phrase.strip()) if t]
     if not tokens:
         return ""
@@ -94,6 +149,40 @@ def _compile_glossary_variant_pattern(phrase: str) -> str:
             parts.append(escaped)
     inner = r"\s+".join(parts)
     return rf"(?<!\w){inner}(?!\w)"
+
+
+def _tokenize_definition(text: str) -> set[str]:
+    tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9]{3,}", str(text or "").lower(), flags=re.UNICODE)
+    return {token for token in tokens if token not in _DEFINITION_STOPWORDS}
+
+
+def _definition_similarity(a: str, b: str) -> float:
+    ta = _tokenize_definition(a)
+    tb = _tokenize_definition(b)
+    if not ta or not tb:
+        return 0.0
+    intersection = len(ta.intersection(tb))
+    denominator = len(ta.union(tb))
+    if denominator <= 0:
+        return 0.0
+    return intersection / denominator
+
+
+def _find_term_definition_matches(text: str, term: str) -> list[tuple[str, str]]:
+    escaped_term = re.escape(str(term or "").strip())
+    if not escaped_term:
+        return []
+    pattern = re.compile(
+        rf"(?<!\w)({escaped_term}\s*(?:—|–|-|:)?\s*(?:это|означает|понимается\s+как)\s+([^.!?\n]{{8,320}}))",
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    matches: list[tuple[str, str]] = []
+    for match in pattern.finditer(text):
+        full = str(match.group(1) or "").strip()
+        definition_part = str(match.group(2) or "").strip()
+        if full and definition_part:
+            matches.append((full, definition_part))
+    return matches
 
 
 class RuleEngine:
@@ -130,26 +219,9 @@ class RuleEngine:
                 .order_by(GlossaryTerm.id)
             )
         ).all()
-        pattern_rows = (
-            await db.execute(
-                select(
-                    RulePattern.id,
-                    RulePattern.name,
-                    RulePattern.rule_type,
-                    RulePattern.pattern,
-                    RulePattern.description,
-                    RulePattern.severity,
-                    RulePattern.suggestion_template,
-                    RulePattern.source_ref_id,
-                    RulePattern.updated_at,
-                )
-                .where(RulePattern.is_active.is_(True))
-                .order_by(RulePattern.id)
-            )
-        ).all()
 
         payload = {
-            "version": 1,
+            "version": 2,
             "sources": [
                 {
                     "id": int(row.id),
@@ -176,20 +248,7 @@ class RuleEngine:
                 }
                 for row in glossary_rows
             ],
-            "patterns": [
-                {
-                    "id": int(row.id),
-                    "name": str(row.name),
-                    "rule_type": str(row.rule_type),
-                    "pattern": str(row.pattern),
-                    "description": str(row.description or ""),
-                    "severity": _normalize_severity(row.severity),
-                    "suggestion_template": str(row.suggestion_template or ""),
-                    "source_ref_id": int(row.source_ref_id) if row.source_ref_id else None,
-                    "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-                }
-                for row in pattern_rows
-            ],
+            "patterns": BUILTIN_REGEX_RULES,
         }
 
         encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -209,6 +268,19 @@ class RuleEngine:
         issue_keys: set[str] = set()
         recommendation_keys: set[str] = set()
 
+        source_rows = (
+            await db.execute(
+                select(SourceReference)
+                .where(SourceReference.is_active.is_(True))
+                .order_by(SourceReference.id)
+            )
+        ).scalars().all()
+        source_by_code = {
+            str(source.reference_code): source
+            for source in source_rows
+            if str(source.reference_code or "").strip()
+        }
+
         glossary_rows = (
             await db.execute(
                 select(GlossaryTerm, SourceReference)
@@ -223,10 +295,8 @@ class RuleEngine:
             if not term:
                 continue
             severity = _normalize_severity(glossary.severity_default)
-            forbidden_variants = _normalize_list(glossary.forbidden_variants)
-            if not forbidden_variants:
-                continue
 
+            forbidden_variants = _normalize_list(glossary.forbidden_variants)
             for variant in forbidden_variants:
                 token = variant.strip()
                 if not token:
@@ -236,23 +306,23 @@ class RuleEngine:
                     continue
                 for match in re.finditer(pattern, text, flags=re.IGNORECASE | re.UNICODE):
                     exact_match = match.group(0)
-                    fragment = exact_match
                     suggestion = f"Используйте термин «{term}»."
                     if glossary.canonical_definition:
-                        suggestion = f"{suggestion} {str(glossary.canonical_definition).strip()[:220]}"
-                    issue_text = f"Обнаружен нежелательный термин: «{match.group(0)}»."
+                        suggestion = f"{suggestion} {str(glossary.canonical_definition).strip()}"
+                    issue_text = f"Обнаружен нежелательный термин: «{exact_match}»."
                     reason = f"Термин не соответствует корпоративному глоссарию: {term}."
-                    finding = {
-                        "fragment": fragment,
-                        "suggestion": suggestion,
-                        "reason": reason,
-                        "confidence": "high",
-                        "severity": severity,
-                        "source_ref": _source_payload(source),
-                        "rule_origin": f"glossary:{int(glossary.id)}",
-                        "replacement": term,
-                    }
-                    findings.append(finding)
+                    findings.append(
+                        {
+                            "fragment": exact_match,
+                            "suggestion": suggestion,
+                            "reason": reason,
+                            "confidence": "high",
+                            "severity": severity,
+                            "source_ref": _source_payload(source),
+                            "rule_origin": f"glossary:{int(glossary.id)}",
+                            "replacement": term,
+                        }
+                    )
                     issue_key = issue_text.strip().lower()
                     rec_key = suggestion.strip().lower()
                     if issue_key not in issue_keys:
@@ -269,49 +339,78 @@ class RuleEngine:
                             "matched_count": len(findings),
                         }
 
-        pattern_rows = (
-            await db.execute(
-                select(RulePattern, SourceReference)
-                .outerjoin(SourceReference, SourceReference.id == RulePattern.source_ref_id)
-                .where(RulePattern.is_active.is_(True))
-                .order_by(RulePattern.id)
-            )
-        ).all()
+            canonical_definition = str(glossary.canonical_definition or "").strip()
+            if canonical_definition:
+                def_matches = _find_term_definition_matches(text, term)
+                for full_fragment, candidate_definition in def_matches:
+                    similarity = _definition_similarity(candidate_definition, canonical_definition)
+                    if similarity >= 0.20:
+                        continue
+                    suggestion = f"Используйте каноничное определение: {canonical_definition}"
+                    issue_text = f"Неточное определение термина «{term}»."
+                    reason = f"Определение расходится с эталоном из базы знаний (совпадение {int(similarity * 100)}%)."
+                    findings.append(
+                        {
+                            "fragment": full_fragment,
+                            "suggestion": suggestion,
+                            "reason": reason,
+                            "confidence": "medium",
+                            "severity": severity,
+                            "source_ref": _source_payload(source),
+                            "rule_origin": f"definition:{int(glossary.id)}",
+                            "replacement": f"{term} — это {canonical_definition}",
+                        }
+                    )
+                    issue_key = issue_text.strip().lower()
+                    rec_key = suggestion.strip().lower()
+                    if issue_key not in issue_keys:
+                        issues.append(issue_text)
+                        issue_keys.add(issue_key)
+                    if rec_key not in recommendation_keys:
+                        recommendations.append(suggestion)
+                        recommendation_keys.add(rec_key)
+                    if len(findings) >= max_findings:
+                        return {
+                            "issues": issues,
+                            "recommendations": recommendations,
+                            "issue_details": findings,
+                            "matched_count": len(findings),
+                        }
 
-        for rule, source in pattern_rows:
-            if str(rule.rule_type).lower() != "regex":
+        for idx, rule in enumerate(BUILTIN_REGEX_RULES, start=1):
+            if not bool(rule.get("is_active", True)):
                 continue
             try:
-                compiled = re.compile(str(rule.pattern), flags=re.IGNORECASE | re.MULTILINE | re.UNICODE)
+                compiled = re.compile(
+                    str(rule.get("pattern", "")),
+                    flags=re.IGNORECASE | re.MULTILINE | re.UNICODE,
+                )
             except re.error:
                 continue
 
-            severity = _normalize_severity(rule.severity)
+            source = source_by_code.get(str(rule.get("source_code", "")))
+            severity = _normalize_severity(rule.get("severity"))
+            rule_name = str(rule.get("name") or f"builtin_rule_{idx}")
+            description = str(rule.get("description") or "").strip()
+            suggestion_template = str(rule.get("suggestion_template") or "").strip()
+
             for match in compiled.finditer(text):
                 exact_match = match.group(0)
-                fragment = exact_match
-                issue_text = (
-                    str(rule.description).strip()
-                    if rule.description
-                    else f"Сработало правило «{rule.name}»."
+                issue_text = description or f"Сработало правило «{rule_name}»."
+                suggestion = suggestion_template or "Проверьте этот фрагмент по корпоративным правилам."
+                reason = f"Нарушение шаблонного правила: {rule_name}."
+                findings.append(
+                    {
+                        "fragment": exact_match,
+                        "suggestion": suggestion,
+                        "reason": reason,
+                        "confidence": "medium",
+                        "severity": severity,
+                        "source_ref": _source_payload(source),
+                        "rule_origin": f"pattern:builtin:{rule.get('id', idx)}",
+                        "replacement": _build_replacement_candidate(exact_match, suggestion),
+                    }
                 )
-                suggestion = (
-                    str(rule.suggestion_template).strip()
-                    if rule.suggestion_template
-                    else "Проверьте этот фрагмент по корпоративным правилам и терминологии."
-                )
-                reason = f"Нарушение шаблонного правила: {rule.name}."
-                finding = {
-                    "fragment": fragment,
-                    "suggestion": suggestion,
-                    "reason": reason,
-                    "confidence": "medium",
-                    "severity": severity,
-                    "source_ref": _source_payload(source),
-                    "rule_origin": f"pattern:{int(rule.id)}",
-                    "replacement": _build_replacement_candidate(exact_match, suggestion),
-                }
-                findings.append(finding)
                 issue_key = issue_text.strip().lower()
                 rec_key = suggestion.strip().lower()
                 if issue_key not in issue_keys:

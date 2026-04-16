@@ -21,13 +21,40 @@ class LLMService:
         return self._initialized and self.model is not None
 
     def _candidate_model_paths(self) -> list[Path]:
-        configured_path = Path(settings.MODEL_PATH)
-        candidates = [
-            configured_path,
-            Path("models") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
-            Path(__file__).resolve().parents[2] / "models" / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
-            Path("Model") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
-        ]
+        candidates: list[Path] = []
+
+        configured = str(settings.MODEL_PATH or "").strip()
+        if configured:
+            candidates.append(Path(configured))
+
+        # Legacy fallback paths (keep backward compatibility).
+        candidates.extend(
+            [
+                Path("models") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
+                Path(__file__).resolve().parents[2] / "models" / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
+                Path("Model") / "qwen2.5-14b-instruct-uncensored-q5_k_m.gguf",
+            ]
+        )
+
+        if settings.MODEL_AUTO_SELECT:
+            model_dir = Path(str(settings.MODEL_DIR or "/app/models"))
+            if model_dir.exists() and model_dir.is_dir():
+                model_files = [
+                    p for p in model_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() in {".gguf", ".bin"}
+                ]
+                model_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                if len(model_files) == 1:
+                    candidates.insert(0, model_files[0])
+                elif len(model_files) > 1:
+                    # Prefer the most recently modified model if several are present.
+                    candidates.insert(0, model_files[0])
+                    logger.info(
+                        "MODEL_AUTO_SELECT: found %d models in %s, selected latest: %s",
+                        len(model_files),
+                        model_dir,
+                        model_files[0].name,
+                    )
 
         unique: list[Path] = []
         seen: set[str] = set()
